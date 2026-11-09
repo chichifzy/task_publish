@@ -1,0 +1,11 @@
+# Go
+/bin/
+*.db
+*.db-wal
+*.db-shm
+
+# 前端
+/web/node_modules/
+/web/dist/
+
+.DS_Store

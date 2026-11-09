@@ -1,0 +1,39 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #1f2328;
+  background: #f6f8fa;
+}
+.container { max-width: 860px; margin: 24px auto; padding: 0 16px; }
+.header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 24px; background: #fff; border-bottom: 1px solid #d0d7de;
+}
+.header nav { display: flex; gap: 16px; }
+.header a { color: #0969da; text-decoration: none; }
+.card {
+  background: #fff; border: 1px solid #d0d7de; border-radius: 8px;
+  padding: 16px; margin-bottom: 12px;
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
+}
+.card h1, .card h2, .card h3 { margin: 0; }
+.card p { margin: 0; white-space: pre-wrap; }
+.narrow { max-width: 360px; margin: 80px auto; align-items: stretch; }
+label { display: flex; flex-direction: column; gap: 4px; width: 100%; font-size: 14px; }
+input, textarea, select {
+  font: inherit; padding: 6px 8px; border: 1px solid #d0d7de; border-radius: 6px;
+}
+button {
+  font: inherit; padding: 6px 14px; border: none; border-radius: 6px;
+  background: #1f883d; color: #fff; cursor: pointer;
+}
+button:disabled { opacity: 0.6; cursor: default; }
+button.secondary { background: #eaeef2; color: #1f2328; }
+button.danger { background: #cf222e; }
+button.link { background: none; color: #0969da; padding: 0 0 0 12px; }
+.row { display: flex; gap: 8px; }
+.error { color: #cf222e; }
+.muted { color: #656d76; }
+table { width: 100%; border-collapse: collapse; background: #fff; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid #d0d7de; }
