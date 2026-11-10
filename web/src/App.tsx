@@ -14,6 +14,7 @@ import SettingsPage from "./pages/SettingsPage";
 import UsersPage from "./pages/UsersPage";
 import ProfilePage from "./pages/ProfilePage";
 import MembersPage from "./pages/MembersPage";
+import ShopPage from "./pages/ShopPage";
 
 const pages: Record<string, ReactNode> = {
   "/": <PublicPage />,
@@ -24,6 +25,7 @@ const pages: Record<string, ReactNode> = {
   "/settings": <SettingsPage />,
   "/users": <UsersPage />,
   "/members": <MembersPage />,
+  "/shop": <ShopPage />,
 };
 
 type NavItem = { to: string; label: string; badge?: number; dot?: boolean };
@@ -32,6 +34,7 @@ type NavItem = { to: string; label: string; badge?: number; dot?: boolean };
 function navFor(me: Me): NavItem[] {
   const reviews: NavItem = { to: "/reviews", label: "任务审核", badge: me.pendingReviews };
   const records: NavItem = { to: "/records", label: "任务记录" };
+  const shop: NavItem = { to: "/shop", label: "积分商城", dot: me.shopAlert };
   switch (me.role) {
     case "admin":
       return [
@@ -39,6 +42,7 @@ function navFor(me: Me): NavItem[] {
         { to: "/private", label: "私有仓库" },
         reviews,
         records,
+        shop,
         { to: "/users", label: "用户管理" },
       ];
     case "super":
@@ -47,6 +51,7 @@ function navFor(me: Me): NavItem[] {
         { to: "/private", label: "私有仓库" },
         reviews,
         records,
+        shop,
         { to: "/members", label: "Member管理", dot: me.newBindRequests },
       ];
     case "member": {
@@ -54,6 +59,7 @@ function navFor(me: Me): NavItem[] {
         { to: "/", label: "任务大厅" },
         { to: "/mine", label: "我的任务", dot: me.newTasks },
         records,
+        shop,
         { to: "/settings", label: "设置" },
       ];
       // 被撤销的高级用户：可查看冻结的私有仓库，审核之前派发的任务
@@ -190,8 +196,14 @@ function Layout({ user, logout }: { user: Me; logout: () => void }) {
         <div className="brand">任务发布系统</div>
         {user.role === "member" && (
           <div className="points-box">
-            <span className="muted">我的积分</span>
+            <span className="muted">通用积分</span>
             <strong>{user.points}</strong>
+            {user.exclusivePoints.map((e) => (
+              <div key={e.super.uid} className="exclusive-points">
+                <span className="muted">专有 · {e.super.nickname}</span>
+                <b>{e.points}</b>
+              </div>
+            ))}
           </div>
         )}
         <nav className="side-nav">

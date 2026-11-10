@@ -171,4 +171,69 @@ CREATE UNIQUE INDEX assignments_one_active ON assignments(user_id, task_id)
 CREATE INDEX assignments_user_id ON assignments(user_id);
 CREATE INDEX assignments_reviewer ON assignments(reviewer_id, status);
 `,
+	// #6 专有积分：高级用户派发的任务完成后获得该高级用户的专有积分，按 (普通用户, 高级用户) 分开记。
+	// users.points 为通用积分。exclusive_super_id / super_id 为空表示通用积分。历史记录保持通用。
+	`
+ALTER TABLE assignments ADD COLUMN exclusive_super_id INTEGER REFERENCES users(id);
+ALTER TABLE points_log ADD COLUMN super_id INTEGER REFERENCES users(id);
+CREATE TABLE exclusive_points (
+	user_id  INTEGER NOT NULL REFERENCES users(id),
+	super_id INTEGER NOT NULL REFERENCES users(id),
+	points   INTEGER NOT NULL DEFAULT 0, -- 可以为负数
+	PRIMARY KEY (user_id, super_id)
+) WITHOUT ROWID;
+CREATE INDEX exclusive_points_super_id ON exclusive_points(super_id);
+`,
+	// #7 积分商城：owner_id 为空是官方商城（管理员维护，消耗通用积分），否则属于该高级用户的专有商城
+	// （消耗该高级用户的专有积分）。商品删除只做标记，购买记录保存名称、详情、积分的快照。
+	`
+CREATE TABLE products (
+	id         INTEGER PRIMARY KEY,
+	owner_id   INTEGER REFERENCES users(id),
+	name       TEXT NOT NULL,
+	detail     TEXT NOT NULL DEFAULT '',
+	cost       INTEGER NOT NULL CHECK (cost >= 1),
+	deleted    INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
+	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+	updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE INDEX products_owner_id ON products(owner_id);
+
+CREATE TABLE purchases (
+	id          INTEGER PRIMARY KEY,
+	product_id  INTEGER NOT NULL REFERENCES products(id),
+	user_id     INTEGER NOT NULL REFERENCES users(id),
+	super_id    INTEGER REFERENCES users(id), -- 为空表示官方商城
+	name        TEXT NOT NULL,
+	detail      TEXT NOT NULL DEFAULT '',
+	cost        INTEGER NOT NULL,
+	reminded    INTEGER NOT NULL DEFAULT 0 CHECK (reminded IN (0, 1)), -- 高级用户催核销，普通用户查看后清除
+	redeemed_at TEXT,
+	created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE INDEX purchases_user_id ON purchases(user_id, super_id);
+CREATE INDEX purchases_super_id ON purchases(super_id);
+`,
+	// #8 官方商城的商品可以免费（cost = 0），专有商城仍至少 1 积分。需要重建表以修改 CHECK。
+	`
+CREATE TABLE products_new (
+	id         INTEGER PRIMARY KEY,
+	owner_id   INTEGER REFERENCES users(id),
+	name       TEXT NOT NULL,
+	detail     TEXT NOT NULL DEFAULT '',
+	cost       INTEGER NOT NULL CHECK (cost >= 1 OR (owner_id IS NULL AND cost = 0)),
+	deleted    INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
+	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+	updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+INSERT INTO products_new SELECT id, owner_id, name, detail, cost, deleted, created_at, updated_at FROM products;
+DROP TABLE products;
+ALTER TABLE products_new RENAME TO products;
+CREATE INDEX products_owner_id ON products(owner_id);
+`,
+	// #9 买家从“已购项目”、卖家从“售出记录”中各自删除（隐藏）购买记录
+	`
+ALTER TABLE purchases ADD COLUMN buyer_hidden INTEGER NOT NULL DEFAULT 0 CHECK (buyer_hidden IN (0, 1));
+ALTER TABLE purchases ADD COLUMN seller_hidden INTEGER NOT NULL DEFAULT 0 CHECK (seller_hidden IN (0, 1));
+`,
 }

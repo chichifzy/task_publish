@@ -46,6 +46,7 @@ export default function RecordsPage() {
             key={a.id}
             code={code}
             points={a.points}
+            exclusive={a.exclusive}
             tags={[
               statusTag[a.status],
               { text: dispatcher ? `派发给 ${userLabel(a.user)}` : a.source === "dispatch" ? `${userLabel(a.reviewer)} 派发` : "公共任务", tone: dispatcher ? "blue" : undefined },

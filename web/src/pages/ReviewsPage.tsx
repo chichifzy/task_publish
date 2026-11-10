@@ -34,11 +34,12 @@ function ReviewCard({ a, run }: { a: Assignment; run: Run }) {
     <TaskCard
       code={code}
       points={a.points}
+      exclusive={a.exclusive}
       tags={[{ text: userLabel(a.user), tone: "blue" }, { text: sourceText(a) }]}
       description={a.description}
       actions={
         <>
-          <button onClick={() => run(() => api.review(a.id, true, note), `${code} 已通过，${userLabel(a.user)} 获得 ${a.points} 积分`)}>
+          <button onClick={() => run(() => api.review(a.id, true, note), `${code} 已通过，${userLabel(a.user)} 获得 ${a.points} ${a.exclusive ? "专有积分" : "通用积分"}`)}>
             通过
           </button>
           <button

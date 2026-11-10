@@ -59,12 +59,17 @@ a { color: var(--primary); }
   box-shadow: inset 0 0 0 6px rgba(255, 255, 255, 0.35);
 }
 .points-box {
-  display: flex; justify-content: space-between; align-items: baseline;
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline;
   padding: 10px 12px; border-radius: 10px; background: var(--primary-softer);
   border: 1px solid var(--primary-soft);
 }
 .points-box .muted { font-size: 13px; }
 .points-box strong { font-size: 20px; color: var(--primary-active); }
+.exclusive-points {
+  width: 100%; display: flex; justify-content: space-between; gap: 8px; margin-top: 4px;
+}
+.exclusive-points .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exclusive-points b { color: var(--primary-active); }
 .side-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow-y: auto; }
 .side-nav a {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -83,6 +88,7 @@ a { color: var(--primary); }
   font-size: 12px; line-height: 20px; text-align: center; font-weight: 600;
 }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+button .dot { margin-left: 6px; vertical-align: middle; }
 
 /* 头像与弹出菜单 */
 .user-menu { position: relative; border-top: 1px solid var(--border); padding-top: 12px; }
@@ -293,8 +299,15 @@ tbody tr:hover { background: #f8fcfa; }
 /* 顶部栏和抽屉遮罩只在手机端出现 */
 .topbar, .drawer-mask { display: none; }
 
+/* 积分商城列表项：内容在左，操作按钮在右 */
+.card.shop-item { flex-direction: row; align-items: center; gap: 16px; }
+.shop-item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.shop-item-actions { flex-shrink: 0; flex-wrap: nowrap; }
+
 /* ---------- 窄屏：顶部栏 + 抽屉式侧边栏 ---------- */
 @media (max-width: 768px) {
+  .card.shop-item { flex-direction: column; align-items: stretch; gap: 10px; }
+  .shop-item-actions { justify-content: flex-end; }
   .layout { flex-direction: column; height: auto; min-height: 100%; }
   .topbar {
     position: sticky; top: 0; z-index: 20;

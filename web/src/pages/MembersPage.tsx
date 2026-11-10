@@ -80,7 +80,8 @@ export default function MembersPage() {
             <tr>
               <th>用户 ID</th>
               <th>用户名</th>
-              <th>积分</th>
+              <th>通用积分</th>
+              <th>专有积分</th>
               <th>注册时间</th>
               <th>绑定时间</th>
               <th></th>
@@ -92,6 +93,7 @@ export default function MembersPage() {
                 <td>{m.uid}</td>
                 <td>{m.nickname}</td>
                 <td>{m.points}</td>
+                <td>{m.exclusivePoints}</td>
                 <td>{day(m.createdAt)}</td>
                 <td>{day(m.boundAt)}</td>
                 <td>

@@ -15,6 +15,10 @@ export type Me = {
   /** 高级用户：有未查看的绑定/解绑申请 */
   newBindRequests: boolean;
   newTasks: boolean;
+  /** 普通用户：有被催核销的已购商品 */
+  shopAlert: boolean;
+  /** 普通用户：在各高级用户处的专有积分（points 为通用积分） */
+  exclusivePoints: { super: UserRef; points: number }[];
 };
 
 export type Task = {
@@ -42,6 +46,8 @@ export type Assignment = {
   source: "claim" | "draw" | "dispatch";
   description: string;
   points: number;
+  /** 高级用户派发的任务：完成后获得派发者（reviewer）的专有积分 */
+  exclusive: boolean;
   status: AssignmentStatus;
   submission: string;
   reviewNote: string;
@@ -67,6 +73,8 @@ export type SuperInfo = UserRef & { status: BindStatus | "blocked" | "" };
 export type BindingInfo = UserRef & { status: BindStatus; active: boolean };
 export type MemberInfo = UserRef & {
   points: number;
+  /** 在当前高级用户处的专有积分 */
+  exclusivePoints: number;
   createdAt: string;
   status: BindStatus;
   appliedAt: string;
@@ -82,6 +90,26 @@ export type AdminBlockInfo = {
   requester: string | null;
 };
 export type UserInfo = UserRef & { role: Role; points: number; createdAt: string };
+
+export type Product = { id: number; name: string; detail: string; cost: number; createdAt: string };
+export type ProductInput = { name: string; detail: string; cost: number };
+export type Shop = {
+  official: Product[];
+  /** 高级用户：只有自己的商城；普通用户：已绑定高级用户的商城，points 为在该商城可用的专有积分 */
+  exclusive: { super: UserRef; points: number; products: Product[] }[];
+};
+export type Purchase = {
+  id: number;
+  name: string;
+  detail: string;
+  cost: number;
+  /** 为空表示官方商城 */
+  super: UserRef | null;
+  buyer: UserRef;
+  reminded: boolean;
+  redeemedAt: string | null;
+  createdAt: string;
+};
 
 export class ApiError extends Error {
   constructor(
@@ -102,8 +130,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     const data = await res.json().catch(() => null);
     throw new ApiError(res.status, data?.error ?? `请求失败（${res.status}）`);
   }
-  if (res.status === 204) return undefined as T;
-  return res.json();
+  // 204 或空响应体（如 201 无内容）不解析 JSON
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 const q = encodeURIComponent;
@@ -139,17 +168,29 @@ export const api = {
   deletePrivate: (id: number) => request<void>("DELETE", `/private/tasks/${id}`),
   dispatch: (id: number, uids: string[]) =>
     request<DispatchResult[]>("POST", `/private/tasks/${id}/dispatch`, { uids }),
-  dispatchTargets: () => request<UserRef[]>("GET", "/dispatch-targets"),
+  dispatchTargets: () => request<(UserRef & { unredeemed: boolean })[]>("GET", "/dispatch-targets"),
 
   myAssignments: () => request<Assignment[]>("GET", "/assignments/mine"),
   submit: (id: number, submission: string) => request<void>("POST", `/assignments/${id}/submit`, { submission }),
-  abandon: (id: number) => request<{ penalty: number; points: number }>("POST", `/assignments/${id}/abandon`),
+  abandon: (id: number) => request<{ penalty: number }>("POST", `/assignments/${id}/abandon`),
   reviews: () => request<Assignment[]>("GET", "/reviews"),
   review: (id: number, approve: boolean, note: string) =>
     request<void>("POST", `/assignments/${id}/review`, { approve, note }),
   cancelAssignment: (id: number) => request<void>("POST", `/assignments/${id}/cancel`),
   records: () => request<Assignment[]>("GET", "/records"),
   deleteRecord: (id: number) => request<void>("DELETE", `/records/${id}`),
+
+  shop: () => request<Shop>("GET", "/shop"),
+  createProduct: (input: ProductInput) => request<{ id: number }>("POST", "/shop/products", input),
+  updateProduct: (id: number, input: ProductInput) => request<void>("PUT", `/shop/products/${id}`, input),
+  deleteProduct: (id: number) => request<void>("DELETE", `/shop/products/${id}`),
+  buyProduct: (id: number) => request<void>("POST", `/shop/products/${id}/buy`),
+  myPurchases: () => request<Purchase[]>("GET", "/shop/purchases"),
+  redeem: (id: number) => request<void>("POST", `/shop/purchases/${id}/redeem`),
+  deletePurchase: (id: number) => request<void>("DELETE", `/shop/purchases/${id}`),
+  sales: () => request<Purchase[]>("GET", "/shop/sales"),
+  deleteSale: (id: number) => request<void>("DELETE", `/shop/sales/${id}`),
+  remind: (id: number) => request<void>("POST", `/shop/sales/${id}/remind`),
 
   searchSupers: (query: string) => request<SuperInfo[]>("GET", `/supers?q=${q(query)}`),
   myBindings: () => request<BindingInfo[]>("GET", "/bindings"),

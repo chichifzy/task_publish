@@ -17,16 +17,20 @@ type newAssignment struct {
 	Source      string
 	Description string
 	Points      int64
+	// ExclusiveSuperID 非空表示高级用户派发的任务，完成后获得该高级用户的专有积分
+	ExclusiveSuperID sql.NullInt64
 }
 
 // insertAssignment 创建接取记录并保存任务快照。
 // 唯一索引保证同一用户在完成前不能以任何方式重复接取同一任务。
 func insertAssignment(ctx context.Context, tx *sql.Tx, a newAssignment) (int64, error) {
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO assignments (task_id, task_public, user_id, reviewer_id, source, description, points, seen)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO assignments (task_id, task_public, user_id, reviewer_id, source, description, points, seen,
+		                         exclusive_super_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.TaskID, a.Public, a.UserID, a.ReviewerID, a.Source, a.Description, a.Points,
-		a.Source != "dispatch") // 派发的任务标记为未查看，用于“我的任务”红点
+		a.Source != "dispatch", // 派发的任务标记为未查看，用于“我的任务”红点
+		a.ExclusiveSuperID)
 	if isUniqueViolation(err) {
 		return 0, errStatus(http.StatusConflict, "正在进行此任务，完成前不能重复接取")
 	}
@@ -58,6 +62,7 @@ type Assignment struct {
 	Source      string  `json:"source"`
 	Description string  `json:"description"`
 	Points      int64   `json:"points"`
+	Exclusive   bool    `json:"exclusive"` // 完成后获得派发者（高级用户）的专有积分
 	Status      string  `json:"status"`
 	Submission  string  `json:"submission"`
 	ReviewNote  string  `json:"reviewNote"`
@@ -68,7 +73,7 @@ type Assignment struct {
 }
 
 const assignmentSelect = `
-	SELECT a.id, a.task_id, a.task_public, a.source, a.description, a.points, a.status,
+	SELECT a.id, a.task_id, a.task_public, a.source, a.description, a.points, a.exclusive_super_id IS NOT NULL, a.status,
 	       a.submission, a.review_note, a.created_at, a.updated_at,
 	       u.uid, u.nickname, rv.uid, rv.nickname
 	FROM assignments a
@@ -85,7 +90,7 @@ func (s *Server) queryAssignments(w http.ResponseWriter, r *http.Request, where 
 	list := []Assignment{}
 	for rows.Next() {
 		var a Assignment
-		if err := rows.Scan(&a.ID, &a.TaskID, &a.TaskPublic, &a.Source, &a.Description, &a.Points,
+		if err := rows.Scan(&a.ID, &a.TaskID, &a.TaskPublic, &a.Source, &a.Description, &a.Points, &a.Exclusive,
 			&a.Status, &a.Submission, &a.ReviewNote, &a.CreatedAt, &a.UpdatedAt,
 			&a.User.UID, &a.User.Nickname, &a.Reviewer.UID, &a.Reviewer.Nickname); err != nil {
 			internalError(w, r, err)
@@ -243,12 +248,14 @@ func (s *Server) abandonAssignment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := currentUser(r)
-	var penalty, balance int64
+	var penalty int64
 	err := s.withTx(r.Context(), func(tx *sql.Tx) error {
 		var points int64
 		var status string
+		var superID sql.NullInt64
 		err := tx.QueryRowContext(r.Context(),
-			`SELECT points, status FROM assignments WHERE id = ? AND user_id = ?`, id, u.ID).Scan(&points, &status)
+			`SELECT points, status, exclusive_super_id FROM assignments WHERE id = ? AND user_id = ?`,
+			id, u.ID).Scan(&points, &status, &superID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return errStatus(http.StatusNotFound, "任务记录不存在")
 		}
@@ -258,31 +265,66 @@ func (s *Server) abandonAssignment(w http.ResponseWriter, r *http.Request) {
 		if status != "in_progress" && status != "submitted" {
 			return errStatus(http.StatusConflict, "只有未完成的任务可以放弃")
 		}
+		var general int64
 		if err := tx.QueryRowContext(r.Context(),
-			`SELECT points FROM users WHERE id = ?`, u.ID).Scan(&balance); err != nil {
+			`SELECT points FROM users WHERE id = ?`, u.ID).Scan(&general); err != nil {
 			return err
 		}
-		if balance < 0 {
-			return errStatus(http.StatusConflict, "积分为负数时不能放弃任务")
-		}
 		penalty = points / 2 // 积分为正整数，整数除法即向下取整
+		var fromGeneral, fromExclusive int64
+		if !superID.Valid {
+			if general < 0 {
+				return errStatus(http.StatusConflict, "通用积分为负数时不能放弃任务")
+			}
+			fromGeneral = penalty
+		} else {
+			// 专有任务：先扣该派发者的专有积分到 0，再用通用积分抵扣到 0，仍不足的部分让专有积分变为负数。
+			// 为负数的积分不参与抵扣（0 分仍可参与）；两种积分都为负数时不能放弃。
+			exclusive, err := exclusiveBalance(r.Context(), tx, u.ID, superID.Int64)
+			if err != nil {
+				return err
+			}
+			switch {
+			case exclusive < 0 && general < 0:
+				return errStatus(http.StatusConflict, "专有积分和通用积分都为负数时不能放弃任务")
+			case exclusive < 0:
+				fromGeneral = penalty
+			default:
+				fromGeneral = min(max(general, 0), penalty-min(exclusive, penalty))
+				fromExclusive = penalty - fromGeneral
+			}
+		}
 		if _, err := tx.ExecContext(r.Context(), `
 			UPDATE assignments SET status = 'abandoned',
 			       updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 			WHERE id = ?`, id); err != nil {
 			return err
 		}
-		if penalty == 0 {
-			return nil
+		if fromGeneral > 0 {
+			if err := changePoints(r.Context(), tx, u.ID, sql.NullInt64{}, -fromGeneral, "abandon", id); err != nil {
+				return err
+			}
 		}
-		balance -= penalty
-		return changePoints(r.Context(), tx, u.ID, -penalty, "abandon", id)
+		if fromExclusive > 0 {
+			return changePoints(r.Context(), tx, u.ID, superID, -fromExclusive, "abandon", id)
+		}
+		return nil
 	})
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int64{"penalty": penalty, "points": balance})
+	writeJSON(w, http.StatusOK, map[string]int64{"penalty": penalty})
+}
+
+func exclusiveBalance(ctx context.Context, tx *sql.Tx, userID, superID int64) (int64, error) {
+	var n int64
+	err := tx.QueryRowContext(ctx,
+		`SELECT points FROM exclusive_points WHERE user_id = ? AND super_id = ?`, userID, superID).Scan(&n)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return n, err
 }
 
 // reviewAssignment 审核人通过或退回提交。通过后发放积分；退回后任务回到进行中。
@@ -310,9 +352,10 @@ func (s *Server) reviewAssignment(w http.ResponseWriter, r *http.Request) {
 	err := s.withTx(r.Context(), func(tx *sql.Tx) error {
 		var userID, points int64
 		var status string
+		var superID sql.NullInt64
 		err := tx.QueryRowContext(r.Context(),
-			`SELECT user_id, points, status FROM assignments WHERE id = ? AND reviewer_id = ?`,
-			id, currentUser(r).ID).Scan(&userID, &points, &status)
+			`SELECT user_id, points, status, exclusive_super_id FROM assignments WHERE id = ? AND reviewer_id = ?`,
+			id, currentUser(r).ID).Scan(&userID, &points, &status, &superID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return errStatus(http.StatusNotFound, "任务记录不存在")
 		}
@@ -335,7 +378,7 @@ func (s *Server) reviewAssignment(w http.ResponseWriter, r *http.Request) {
 		if !in.Approve {
 			return nil
 		}
-		return changePoints(r.Context(), tx, userID, points, "complete", id)
+		return changePoints(r.Context(), tx, userID, superID, points, "complete", id)
 	})
 	if err != nil {
 		fail(w, r, err)
@@ -344,14 +387,20 @@ func (s *Server) reviewAssignment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// changePoints 修改用户积分并写一条积分流水。
-func changePoints(ctx context.Context, tx *sql.Tx, userID, delta int64, reason string, assignmentID int64) error {
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE users SET points = points + ? WHERE id = ?`, delta, userID); err != nil {
+// changePoints 修改用户积分并写一条积分流水。superID 为空时修改通用积分，否则修改该高级用户的专有积分。
+func changePoints(ctx context.Context, tx *sql.Tx, userID int64, superID sql.NullInt64, delta int64, reason string, assignmentID int64) error {
+	q := `UPDATE users SET points = points + ? WHERE id = ?`
+	args := []any{delta, userID}
+	if superID.Valid {
+		q = `INSERT INTO exclusive_points (user_id, super_id, points) VALUES (?, ?, ?)
+			ON CONFLICT (user_id, super_id) DO UPDATE SET points = points + excluded.points`
+		args = []any{userID, superID.Int64, delta}
+	}
+	if _, err := tx.ExecContext(ctx, q, args...); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx,
-		`INSERT INTO points_log (user_id, delta, reason, assignment_id) VALUES (?, ?, ?, ?)`,
-		userID, delta, reason, assignmentID)
+		`INSERT INTO points_log (user_id, delta, reason, assignment_id, super_id) VALUES (?, ?, ?, ?, ?)`,
+		userID, delta, reason, assignmentID, superID)
 	return err
 }

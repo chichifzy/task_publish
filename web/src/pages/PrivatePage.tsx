@@ -192,9 +192,15 @@ function DispatchPanel({ taskId, isAdmin }: { taskId: number; isAdmin: boolean }
           <input placeholder="按用户 ID 或用户名筛选" value={filter} onChange={(e) => setFilter(e.target.value)} />
           <div className="checklist">
             {shown.map((t) => (
-              <label className="inline" key={t.uid}>
-                <input type="checkbox" checked={selected.has(t.uid)} onChange={() => toggle(t.uid)} />
+              <label className="inline" key={t.uid} title={t.unredeemed ? "该用户有未核销的商品，核销前不能派发新任务" : undefined}>
+                <input
+                  type="checkbox"
+                  disabled={t.unredeemed}
+                  checked={selected.has(t.uid)}
+                  onChange={() => toggle(t.uid)}
+                />
                 {userLabel(t)}
+                {t.unredeemed && <span className="muted">（有未核销商品）</span>}
               </label>
             ))}
           </div>

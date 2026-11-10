@@ -208,23 +208,26 @@ func (s *Server) memberBindingAction(w http.ResponseWriter, r *http.Request) {
 // ---------- 高级用户：Member 管理 ----------
 
 type memberInfo struct {
-	UID       string  `json:"uid"`
-	Nickname  string  `json:"nickname"`
-	Points    int64   `json:"points"`
-	CreatedAt string  `json:"createdAt"` // 注册时间
-	Status    string  `json:"status"`
-	AppliedAt string  `json:"appliedAt"`
-	BoundAt   *string `json:"boundAt"`
+	UID             string  `json:"uid"`
+	Nickname        string  `json:"nickname"`
+	Points          int64   `json:"points"`
+	ExclusivePoints int64   `json:"exclusivePoints"` // 在当前高级用户处的专有积分
+	CreatedAt       string  `json:"createdAt"`       // 注册时间
+	Status          string  `json:"status"`
+	AppliedAt       string  `json:"appliedAt"`
+	BoundAt         *string `json:"boundAt"`
 }
 
 func (s *Server) listMembers(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT u.uid, u.nickname, u.points, u.created_at, b.status, b.created_at, b.bound_at
+		SELECT u.uid, u.nickname, u.points,
+		       COALESCE((SELECT e.points FROM exclusive_points e WHERE e.user_id = u.id AND e.super_id = b.super_id), 0),
+		       u.created_at, b.status, b.created_at, b.bound_at
 		FROM bindings b JOIN users u ON u.id = b.member_id
 		WHERE b.super_id = ?
 		ORDER BY b.status = 'bound', b.created_at`, currentUser(r).ID)
 	list, err := scanList(rows, err, func(v *memberInfo) []any {
-		return []any{&v.UID, &v.Nickname, &v.Points, &v.CreatedAt, &v.Status, &v.AppliedAt, &v.BoundAt}
+		return []any{&v.UID, &v.Nickname, &v.Points, &v.ExclusivePoints, &v.CreatedAt, &v.Status, &v.AppliedAt, &v.BoundAt}
 	})
 	if err != nil {
 		internalError(w, r, err)

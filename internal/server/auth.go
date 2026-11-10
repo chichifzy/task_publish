@@ -189,19 +189,39 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		CanSwitchIdentity bool `json:"canSwitchIdentity"` // 管理员及其身份账号可以切换身份
 		NewBindRequests   bool `json:"newBindRequests"`   // 有未查看的绑定/解绑申请（高级用户）
 		NewTasks          bool `json:"newTasks"`          // 有未查看的派发任务（普通用户）
+		ShopAlert         bool `json:"shopAlert"`         // 有被催核销、尚未查看的已购商品（普通用户）
+		// 各高级用户的专有积分（普通用户），Points 为通用积分
+		ExclusivePoints []exclusivePoints `json:"exclusivePoints"`
 	}{User: u, CanSwitchIdentity: u.IsAdmin() || u.ParentID.Valid}
 	err := s.db.QueryRowContext(r.Context(), `
 		SELECT
 			(SELECT COUNT(*) FROM assignments WHERE reviewer_id = ? AND status = 'submitted'),
 			EXISTS (SELECT 1 FROM tasks WHERE owner_id = ?),
 			EXISTS (SELECT 1 FROM bindings WHERE super_id = ? AND seen = 0),
-			EXISTS (SELECT 1 FROM assignments WHERE user_id = ? AND seen = 0)`,
-		u.ID, u.ID, u.ID, u.ID).Scan(&resp.PendingReviews, &resp.HasPrivateTasks, &resp.NewBindRequests, &resp.NewTasks)
+			EXISTS (SELECT 1 FROM assignments WHERE user_id = ? AND seen = 0),
+			EXISTS (SELECT 1 FROM purchases WHERE user_id = ? AND reminded = 1 AND redeemed_at IS NULL)`,
+		u.ID, u.ID, u.ID, u.ID, u.ID).Scan(&resp.PendingReviews, &resp.HasPrivateTasks, &resp.NewBindRequests, &resp.NewTasks, &resp.ShopAlert)
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	rows, err := s.db.QueryContext(r.Context(), `
+		SELECT s.uid, s.nickname, e.points
+		FROM exclusive_points e JOIN users s ON s.id = e.super_id
+		WHERE e.user_id = ? ORDER BY s.uid`, u.ID)
+	resp.ExclusivePoints, err = scanList(rows, err, func(v *exclusivePoints) []any {
+		return []any{&v.Super.UID, &v.Super.Nickname, &v.Points}
+	})
 	if err != nil {
 		internalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+type exclusivePoints struct {
+	Super  userRef `json:"super"`
+	Points int64   `json:"points"`
 }
 
 // updateSettings 普通用户设置是否接受管理员派发任务。

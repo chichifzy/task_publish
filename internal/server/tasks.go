@@ -543,6 +543,8 @@ func (s *Server) dispatchTask(w http.ResponseWriter, r *http.Request) {
 			msg, err := dispatchOne(r.Context(), tx, u, uid, newAssignment{
 				TaskID: id, Public: false, ReviewerID: u.ID,
 				Source: "dispatch", Description: desc, Points: points,
+				// 高级用户派发的任务完成后获得专有积分，管理员派发的为通用积分
+				ExclusiveSuperID: sql.NullInt64{Int64: u.ID, Valid: u.Role == RoleSuper},
 			})
 			if err != nil {
 				return err
@@ -562,11 +564,12 @@ func (s *Server) dispatchTask(w http.ResponseWriter, r *http.Request) {
 func dispatchOne(ctx context.Context, tx *sql.Tx, dispatcher *User, uid string, a newAssignment) (msg string, err error) {
 	var targetID int64
 	var role string
-	var acceptAdmin, authorized bool
+	var acceptAdmin, authorized, unredeemed bool
 	err = tx.QueryRowContext(ctx, `
 		SELECT u.id, u.role, u.accept_admin_dispatch,
-		       EXISTS (SELECT 1 FROM bindings b WHERE b.member_id = u.id AND b.super_id = ? AND b.status != 'pending_bind')
-		FROM users u WHERE u.uid = ?`, dispatcher.ID, uid).Scan(&targetID, &role, &acceptAdmin, &authorized)
+		       EXISTS (SELECT 1 FROM bindings b WHERE b.member_id = u.id AND b.super_id = ? AND b.status != 'pending_bind'),
+		       EXISTS (SELECT 1 FROM purchases p WHERE p.user_id = u.id AND p.super_id = ? AND p.redeemed_at IS NULL)
+		FROM users u WHERE u.uid = ?`, dispatcher.ID, dispatcher.ID, uid).Scan(&targetID, &role, &acceptAdmin, &authorized, &unredeemed)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return "用户不存在", nil
@@ -578,6 +581,8 @@ func dispatchOne(ctx context.Context, tx *sql.Tx, dispatcher *User, uid string, 
 		return "该用户未开启“接受管理员派发任务”", nil
 	case !dispatcher.IsAdmin() && !authorized:
 		return "该用户未与你绑定", nil
+	case !dispatcher.IsAdmin() && unredeemed:
+		return "该用户有未核销的商品，核销前不能派发新任务", nil
 	}
 	a.UserID = targetID
 	if _, err := insertAssignment(ctx, tx, a); err != nil {
@@ -593,6 +598,8 @@ func dispatchOne(ctx context.Context, tx *sql.Tx, dispatcher *User, uid string, 
 type dispatchTarget struct {
 	UID      string `json:"uid"`
 	Nickname string `json:"nickname"`
+	// 有未核销的、从当前高级用户商城购买的商品，核销前不能派发
+	Unredeemed bool `json:"unredeemed"`
 }
 
 // listDispatchTargets 列出允许当前用户派发任务的普通用户。
@@ -602,11 +609,13 @@ func (s *Server) listDispatchTargets(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if u.IsAdmin() {
 		rows, err = s.db.QueryContext(r.Context(), `
-			SELECT uid, nickname FROM users
+			SELECT uid, nickname, 0 FROM users
 			WHERE role = 'member' AND accept_admin_dispatch = 1 ORDER BY uid`)
 	} else {
 		rows, err = s.db.QueryContext(r.Context(), `
-			SELECT u.uid, u.nickname FROM bindings b JOIN users u ON u.id = b.member_id
+			SELECT u.uid, u.nickname,
+			       EXISTS (SELECT 1 FROM purchases p WHERE p.user_id = u.id AND p.super_id = b.super_id AND p.redeemed_at IS NULL)
+			FROM bindings b JOIN users u ON u.id = b.member_id
 			WHERE b.super_id = ? AND b.status != 'pending_bind' AND u.role = 'member' ORDER BY u.uid`, u.ID)
 	}
 	if err != nil {
@@ -617,7 +626,7 @@ func (s *Server) listDispatchTargets(w http.ResponseWriter, r *http.Request) {
 	targets := []dispatchTarget{}
 	for rows.Next() {
 		var t dispatchTarget
-		if err := rows.Scan(&t.UID, &t.Nickname); err != nil {
+		if err := rows.Scan(&t.UID, &t.Nickname, &t.Unredeemed); err != nil {
 			internalError(w, r, err)
 			return
 		}

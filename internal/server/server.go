@@ -69,6 +69,19 @@ func New(db *sql.DB, static fs.FS, secureCookie bool) http.Handler {
 	m.Handle("GET /api/records", s.requireUser(s.listRecords))
 	m.Handle("DELETE /api/records/{id}", s.requireUser(s.deleteRecord))
 
+	// 积分商城：管理员维护官方商城，高级用户维护自己的专有商城，普通用户购买和核销
+	m.Handle("GET /api/shop", s.requireUser(s.getShop))
+	m.Handle("POST /api/shop/products", s.requireRole(s.createProduct, admin, super))
+	m.Handle("PUT /api/shop/products/{id}", s.requireRole(s.updateProduct, admin, super))
+	m.Handle("DELETE /api/shop/products/{id}", s.requireRole(s.deleteProduct, admin, super))
+	m.Handle("POST /api/shop/products/{id}/buy", s.requireRole(s.buyProduct, member))
+	m.Handle("GET /api/shop/purchases", s.requireRole(s.listMyPurchases, member))
+	m.Handle("POST /api/shop/purchases/{id}/redeem", s.requireRole(s.redeemPurchase, member))
+	m.Handle("DELETE /api/shop/purchases/{id}", s.requireRole(s.deletePurchase, member))
+	m.Handle("GET /api/shop/sales", s.requireRole(s.listSales, admin, super))
+	m.Handle("DELETE /api/shop/sales/{id}", s.requireRole(s.deleteSale, admin, super))
+	m.Handle("POST /api/shop/sales/{id}/remind", s.requireRole(s.remindRedeem, super))
+
 	// 绑定：普通用户申请绑定高级用户，高级用户同意后可以向其派发任务
 	m.Handle("GET /api/supers", s.requireRole(s.searchSupers, member))
 	m.Handle("GET /api/bindings", s.requireRole(s.listMyBindings, member))

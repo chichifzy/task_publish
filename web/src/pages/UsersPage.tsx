@@ -59,7 +59,7 @@ export default function UsersPage() {
               <th>用户 ID</th>
               <th>用户名</th>
               <th>角色</th>
-              <th>积分</th>
+              <th>通用积分</th>
               <th></th>
             </tr>
           </thead>
