@@ -14,12 +14,18 @@ make dev-web   # 终端 2：Vite，:5173，/api 代理到 :8080
 
 ## 管理员
 
-注册账号后，用命令行提升为管理员：
+系统有且仅有一个管理员，不能注册产生。首次部署时用命令行创建（随后输入密码）：
 
 ```bash
-go run . -db data.db promote <username>
-# 或生产环境
-./task_publish -db /path/to/data.db promote <username>
+go run . -db data.db create-admin <用户ID> <用户名>
+# 生产环境
+./task_publish -db /path/to/data.db create-admin <用户ID> <用户名>
+```
+
+## 测试
+
+```bash
+go build -o bin/task_publish . && scripts/smoke.sh   # 后端接口冒烟测试
 ```
 
 ## 构建与部署
@@ -39,19 +45,23 @@ HTTPS 部署（例如放在 Caddy/Nginx 后面）时加上 `-secure-cookie`。
 ## 目录
 
 ```
-main.go                 入口、命令行参数
+main.go, admin.go       入口、命令行参数、create-admin
 internal/db/            打开数据库、迁移（migrations.go 追加新迁移）
-internal/server/        路由、认证、任务接口
-web/                    React 前端；embed.go 嵌入 dist
+internal/server/        路由与接口：auth / tasks / assignments / users
+web/src/pages/          各页面：公共仓库、私有仓库、我的任务、审核、设置、用户管理
+web/src/components/     任务卡片、随机抽取等组件
+scripts/smoke.sh        后端冒烟测试
 ```
 
-## API
+## 业务规则速查
 
-| 方法 | 路径 | 权限 |
-|---|---|---|
-| POST | /api/auth/register, /api/auth/login, /api/auth/logout | 公开 |
-| GET | /api/me | 登录 |
-| GET | /api/tasks | 登录（管理员看全部） |
-| POST | /api/tasks/{id}/claim | 登录 |
-| POST | /api/admin/tasks | 管理员 |
-| PUT / DELETE | /api/admin/tasks/{id} | 管理员 |
+- 角色：管理员（唯一）/ 高级用户（管理员授予、可撤销）/ 普通用户（注册默认）。
+- 任务编号：公共任务 `G-n`，私有任务 `P-n`。
+- 公共任务可见性：管理员看全部；高级用户看启用的；普通用户看启用且全体可见的。
+- 普通用户获取任务：主动接取（全体可见）、随机抽取（仅管理员和高级用户可见，先看积分再接取）、被派发。
+- 同一用户在完成某任务前不能以任何方式重复接取（数据库唯一索引保证）。
+- 派发：只能派发私有仓库任务；管理员需对方开启“接受管理员派发任务”，高级用户需对方授权。
+- 审核：派发的任务由派发者审核，公共任务由管理员审核；不通过退回进行中。
+- 积分：初始 20；完成加任务积分；放弃扣任务积分的 50%（向下取整）；积分为负时不能放弃。
+- 高级用户私有任务积分 1-9；复制来的公共任务可保留原积分，修改积分时需改为 1-9。
+- 撤销高级用户：私有仓库冻结（只读）、已派发任务有效且仍由其审核、授权保留但不能派发；重新授予后恢复。

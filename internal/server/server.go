@@ -20,20 +20,57 @@ func New(db *sql.DB, static fs.FS, secureCookie bool) http.Handler {
 	s := &Server{db: db, secureCookie: secureCookie}
 	m := http.NewServeMux()
 
-	// 认证
+	const (
+		admin  = RoleAdmin
+		super  = RoleSuper
+		member = RoleMember
+	)
+
+	// 认证与个人信息
 	m.HandleFunc("POST /api/auth/register", s.register)
 	m.HandleFunc("POST /api/auth/login", s.login)
 	m.HandleFunc("POST /api/auth/logout", s.logout)
 	m.Handle("GET /api/me", s.requireUser(s.me))
+	m.Handle("PUT /api/me/settings", s.requireRole(s.updateSettings, member))
 
-	// 普通用户
-	m.Handle("GET /api/tasks", s.requireUser(s.listTasks))
-	m.Handle("POST /api/tasks/{id}/claim", s.requireUser(s.claimTask))
+	// 公共任务仓库
+	m.Handle("GET /api/public/tasks", s.requireUser(s.listPublicTasks))
+	m.Handle("POST /api/public/tasks", s.requireRole(s.createPublicTask, admin))
+	m.Handle("PUT /api/public/tasks/{id}", s.requireRole(s.updatePublicTask, admin))
+	m.Handle("DELETE /api/public/tasks/{id}", s.requireRole(s.deletePublicTask, admin))
+	m.Handle("POST /api/public/tasks/{id}/claim", s.requireRole(s.claimPublicTask, member))
+	m.Handle("POST /api/public/tasks/{id}/copy", s.requireRole(s.copyPublicTask, admin, super))
 
-	// 管理员
-	m.Handle("POST /api/admin/tasks", s.requireAdmin(s.createTask))
-	m.Handle("PUT /api/admin/tasks/{id}", s.requireAdmin(s.updateTask))
-	m.Handle("DELETE /api/admin/tasks/{id}", s.requireAdmin(s.deleteTask))
+	// 随机抽取（仅管理员和高级用户可见的任务）
+	m.Handle("GET /api/draw", s.requireRole(s.currentDraw, member))
+	m.Handle("POST /api/draw", s.requireRole(s.drawTask, member))
+	m.Handle("POST /api/draw/accept", s.requireRole(s.acceptDraw, member))
+	m.Handle("DELETE /api/draw", s.requireRole(s.discardDraw, member))
+
+	// 私有任务仓库：被撤销的高级用户仍可查看（冻结），但不能修改和派发
+	m.Handle("GET /api/private/tasks", s.requireUser(s.listPrivateTasks))
+	m.Handle("POST /api/private/tasks", s.requireRole(s.createPrivateTask, admin, super))
+	m.Handle("PUT /api/private/tasks/{id}", s.requireRole(s.updatePrivateTask, admin, super))
+	m.Handle("DELETE /api/private/tasks/{id}", s.requireRole(s.deletePrivateTask, admin, super))
+	m.Handle("POST /api/private/tasks/{id}/dispatch", s.requireRole(s.dispatchTask, admin, super))
+	m.Handle("GET /api/dispatch-targets", s.requireRole(s.listDispatchTargets, admin, super))
+
+	// 接取记录：自己的任务、提交、放弃；审核（谁是审核人谁能看）
+	m.Handle("GET /api/assignments/mine", s.requireUser(s.listMyAssignments))
+	m.Handle("POST /api/assignments/{id}/submit", s.requireUser(s.submitAssignment))
+	m.Handle("POST /api/assignments/{id}/abandon", s.requireUser(s.abandonAssignment))
+	m.Handle("GET /api/reviews", s.requireUser(s.listReviews))
+	m.Handle("POST /api/assignments/{id}/review", s.requireUser(s.reviewAssignment))
+
+	// 普通用户授权高级用户派发任务
+	m.Handle("GET /api/supers", s.requireRole(s.searchSupers, member))
+	m.Handle("GET /api/authorizations", s.requireRole(s.listAuthorizations, member))
+	m.Handle("POST /api/authorizations", s.requireRole(s.addAuthorization, member))
+	m.Handle("DELETE /api/authorizations/{uid}", s.requireRole(s.removeAuthorization, member))
+
+	// 管理员：用户管理（授予/撤销高级用户）
+	m.Handle("GET /api/admin/users", s.requireRole(s.listUsers, admin))
+	m.Handle("PUT /api/admin/users/{uid}/role", s.requireRole(s.setUserRole, admin))
 
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "接口不存在")

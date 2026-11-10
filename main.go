@@ -23,8 +23,8 @@ func main() {
 	secureCookie := flag.Bool("secure-cookie", false, "为会话 Cookie 设置 Secure 标记（HTTPS 部署时开启）")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), `用法:
-  %[1]s [flags]                    启动服务
-  %[1]s [flags] promote <username> 把用户设为管理员
+  %[1]s [flags]                                启动服务
+  %[1]s [flags] create-admin <用户ID> <用户名>  创建唯一的管理员（随后输入密码）
 
 flags:
 `, os.Args[0])
@@ -42,16 +42,16 @@ flags:
 	switch flag.Arg(0) {
 	case "":
 		// 启动服务
-	case "promote":
-		if flag.NArg() != 2 {
+	case "create-admin":
+		if flag.NArg() != 3 {
 			flag.Usage()
 			os.Exit(2)
 		}
-		if err := db.SetRole(database, flag.Arg(1), "admin"); err != nil {
-			slog.Error("设置管理员失败", "err", err)
+		if err := createAdmin(database, flag.Arg(1), flag.Arg(2)); err != nil {
+			fmt.Fprintln(os.Stderr, "创建管理员失败:", err)
 			os.Exit(1)
 		}
-		fmt.Printf("用户 %s 已设为管理员\n", flag.Arg(1))
+		fmt.Printf("管理员 %s 已创建\n", flag.Arg(1))
 		return
 	default:
 		flag.Usage()

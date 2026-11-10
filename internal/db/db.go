@@ -3,6 +3,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	_ "modernc.org/sqlite" // 纯 Go 实现的 SQLite 驱动，无需 CGO
@@ -14,13 +15,15 @@ func Open(path string) (*sql.DB, error) {
 		"?_pragma=journal_mode(WAL)" + // 读写并发更好
 		"&_pragma=busy_timeout(5000)" +
 		"&_pragma=foreign_keys(1)" +
-		"&_pragma=synchronous(NORMAL)"
+		"&_pragma=synchronous(NORMAL)" +
+		"&_txlock=immediate" // 事务一开始就拿写锁，避免读后写升级失败
 	d, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
 	// SQLite 同一时刻只允许一个写入者。单连接让所有请求排队执行，
 	// 避免 SQLITE_BUSY；对小规模系统足够快。
+	// 注意：事务内只能使用 tx 执行语句，再用 db 会等待这唯一的连接而死锁。
 	d.SetMaxOpenConns(1)
 
 	if err := migrate(d); err != nil {
@@ -57,14 +60,36 @@ func migrate(d *sql.DB) error {
 	return nil
 }
 
-// SetRole 修改用户角色，用于命令行提升管理员。
-func SetRole(d *sql.DB, username, role string) error {
-	res, err := d.Exec("UPDATE users SET role = ? WHERE username = ?", role, username)
+var (
+	ErrAdminExists = errors.New("管理员已存在，系统只能有一个管理员")
+	ErrUIDTaken    = errors.New("用户 ID 已被使用")
+)
+
+// CreateAdmin 创建唯一的管理员账号，仅供命令行使用。
+func CreateAdmin(d *sql.DB, uid, nickname, passwordHash string) error {
+	tx, err := d.Begin()
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("用户 %q 不存在", username)
+	defer tx.Rollback()
+
+	var exists bool
+	if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM users WHERE role = 'admin')`).Scan(&exists); err != nil {
+		return err
 	}
-	return nil
+	if exists {
+		return ErrAdminExists
+	}
+	if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM users WHERE uid = ?)`, uid).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return ErrUIDTaken
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO users (uid, nickname, password_hash, role) VALUES (?, ?, ?, 'admin')`,
+		uid, nickname, passwordHash); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
