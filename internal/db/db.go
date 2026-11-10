@@ -40,6 +40,15 @@ func migrate(d *sql.DB) error {
 	if err := d.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
+	if version >= len(migrations) {
+		return nil
+	}
+	// 重建表时需要先关闭外键检查（事务内无法修改），迁移完成后再逐条用 foreign_key_check 校验。
+	// 连接池只有一个连接，这里的设置作用于后续所有语句。
+	if _, err := d.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+		return err
+	}
+	defer d.Exec("PRAGMA foreign_keys = ON")
 	for i := version; i < len(migrations); i++ {
 		tx, err := d.Begin()
 		if err != nil {
@@ -48,6 +57,17 @@ func migrate(d *sql.DB) error {
 		if _, err := tx.Exec(migrations[i]); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("迁移 #%d: %w", i+1, err)
+		}
+		rows, err := tx.Query("PRAGMA foreign_key_check")
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		broken := rows.Next()
+		rows.Close()
+		if broken {
+			tx.Rollback()
+			return fmt.Errorf("迁移 #%d: 外键校验失败", i+1)
 		}
 		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", i+1)); err != nil {
 			tx.Rollback()

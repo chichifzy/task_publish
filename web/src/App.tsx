@@ -9,6 +9,7 @@ import PublicPage from "./pages/PublicPage";
 import PrivatePage from "./pages/PrivatePage";
 import MyTasksPage from "./pages/MyTasksPage";
 import ReviewsPage from "./pages/ReviewsPage";
+import RecordsPage from "./pages/RecordsPage";
 import SettingsPage from "./pages/SettingsPage";
 import UsersPage from "./pages/UsersPage";
 import ProfilePage from "./pages/ProfilePage";
@@ -19,6 +20,7 @@ const pages: Record<string, ReactNode> = {
   "/private": <PrivatePage />,
   "/mine": <MyTasksPage />,
   "/reviews": <ReviewsPage />,
+  "/records": <RecordsPage />,
   "/settings": <SettingsPage />,
   "/users": <UsersPage />,
   "/members": <MembersPage />,
@@ -28,21 +30,30 @@ type NavItem = { to: string; label: string; badge?: number; dot?: boolean };
 
 // 每个角色能看到的页面。前端只控制展示，真正的权限校验在后端。
 function navFor(me: Me): NavItem[] {
-  const reviews: NavItem = { to: "/reviews", label: "审核", badge: me.pendingReviews };
+  const reviews: NavItem = { to: "/reviews", label: "任务审核", badge: me.pendingReviews };
+  const records: NavItem = { to: "/records", label: "任务记录" };
   switch (me.role) {
     case "admin":
-      return [{ to: "/", label: "公共仓库" }, { to: "/private", label: "私有仓库" }, reviews, { to: "/users", label: "用户管理" }];
+      return [
+        { to: "/", label: "公共仓库" },
+        { to: "/private", label: "私有仓库" },
+        reviews,
+        records,
+        { to: "/users", label: "用户管理" },
+      ];
     case "super":
       return [
         { to: "/", label: "公共仓库" },
         { to: "/private", label: "私有仓库" },
         reviews,
+        records,
         { to: "/members", label: "Member管理", dot: me.newBindRequests },
       ];
     case "member": {
       const items: NavItem[] = [
         { to: "/", label: "任务大厅" },
-        { to: "/mine", label: "我的任务" },
+        { to: "/mine", label: "我的任务", dot: me.newTasks },
+        records,
         { to: "/settings", label: "设置" },
       ];
       // 被撤销的高级用户：可查看冻结的私有仓库，审核之前派发的任务

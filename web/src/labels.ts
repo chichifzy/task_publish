@@ -12,6 +12,7 @@ export const statusTag: Record<AssignmentStatus, Tag> = {
   submitted: { text: "待审核", tone: "orange" },
   completed: { text: "已完成", tone: "green" },
   abandoned: { text: "已放弃", tone: "gray" },
+  cancelled: { text: "已取消", tone: "gray" },
 };
 
 export const userLabel = (u: UserRef) => `${u.nickname}（${u.uid}）`;

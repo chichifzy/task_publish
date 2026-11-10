@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, taskCode, type Assignment } from "../api";
 import { useMe } from "../auth";
 import { useAction, useLoader, type Run } from "../hooks";
@@ -11,6 +11,7 @@ const filters: { key: string; label: string; match: (a: Assignment) => boolean }
   { key: "active", label: "未完成", match: (a) => a.status === "in_progress" || a.status === "submitted" },
   { key: "completed", label: "已完成", match: (a) => a.status === "completed" },
   { key: "abandoned", label: "已放弃", match: (a) => a.status === "abandoned" },
+  { key: "cancelled", label: "已取消", match: (a) => a.status === "cancelled" },
   { key: "all", label: "全部", match: () => true },
 ];
 
@@ -23,6 +24,11 @@ export default function MyTasksPage() {
     refresh();
   });
   const [filter, setFilter] = useState("active");
+
+  // 加载列表时后端已标记新任务为已查看，刷新侧边栏让红点消失
+  useEffect(() => {
+    if (data && me.newTasks) refresh();
+  }, [data, me.newTasks, refresh]);
   const current = filters.find((f) => f.key === filter)!;
   const list = (data ?? []).filter(current.match);
 

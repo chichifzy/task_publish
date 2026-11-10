@@ -64,6 +64,10 @@ func New(db *sql.DB, static fs.FS, secureCookie bool) http.Handler {
 	m.Handle("POST /api/assignments/{id}/abandon", s.requireUser(s.abandonAssignment))
 	m.Handle("GET /api/reviews", s.requireUser(s.listReviews))
 	m.Handle("POST /api/assignments/{id}/review", s.requireUser(s.reviewAssignment))
+	m.Handle("POST /api/assignments/{id}/cancel", s.requireRole(s.cancelAssignment, admin, super))
+	// 任务记录：普通用户看自己已结束的任务，高级用户和管理员看自己派发的任务
+	m.Handle("GET /api/records", s.requireUser(s.listRecords))
+	m.Handle("DELETE /api/records/{id}", s.requireUser(s.deleteRecord))
 
 	// 绑定：普通用户申请绑定高级用户，高级用户同意后可以向其派发任务
 	m.Handle("GET /api/supers", s.requireRole(s.searchSupers, member))

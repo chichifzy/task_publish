@@ -14,6 +14,7 @@ export type Me = {
   canSwitchIdentity: boolean;
   /** 高级用户：有未查看的绑定/解绑申请 */
   newBindRequests: boolean;
+  newTasks: boolean;
 };
 
 export type Task = {
@@ -30,7 +31,7 @@ export type Task = {
   myActive: boolean;
 };
 
-export type AssignmentStatus = "in_progress" | "submitted" | "completed" | "abandoned";
+export type AssignmentStatus = "in_progress" | "submitted" | "completed" | "abandoned" | "cancelled";
 
 export type UserRef = { uid: string; nickname: string };
 
@@ -146,6 +147,9 @@ export const api = {
   reviews: () => request<Assignment[]>("GET", "/reviews"),
   review: (id: number, approve: boolean, note: string) =>
     request<void>("POST", `/assignments/${id}/review`, { approve, note }),
+  cancelAssignment: (id: number) => request<void>("POST", `/assignments/${id}/cancel`),
+  records: () => request<Assignment[]>("GET", "/records"),
+  deleteRecord: (id: number) => request<void>("DELETE", `/records/${id}`),
 
   searchSupers: (query: string) => request<SuperInfo[]>("GET", `/supers?q=${q(query)}`),
   myBindings: () => request<BindingInfo[]>("GET", "/bindings"),

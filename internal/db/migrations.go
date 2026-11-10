@@ -138,4 +138,37 @@ CREATE UNIQUE INDEX unblock_requests_pending ON unblock_requests(user_a, user_b)
 	`
 ALTER TABLE bindings ADD COLUMN seen INTEGER NOT NULL DEFAULT 1 CHECK (seen IN (0, 1));
 `,
+	// #5 接取记录：新增“已取消”状态（派发者取消），收到派发任务的红点（seen），
+	// 以及执行人/派发者各自从“任务记录”中删除（隐藏）记录。需要重建表以修改 status 的 CHECK。
+	`
+CREATE TABLE assignments_new (
+	id              INTEGER PRIMARY KEY,
+	task_id         INTEGER NOT NULL,
+	task_public     INTEGER NOT NULL CHECK (task_public IN (0, 1)),
+	user_id         INTEGER NOT NULL REFERENCES users(id),
+	reviewer_id     INTEGER NOT NULL REFERENCES users(id),
+	source          TEXT NOT NULL CHECK (source IN ('claim', 'draw', 'dispatch')),
+	description     TEXT NOT NULL,
+	points          INTEGER NOT NULL,
+	status          TEXT NOT NULL DEFAULT 'in_progress'
+	                CHECK (status IN ('in_progress', 'submitted', 'completed', 'abandoned', 'cancelled')),
+	submission      TEXT NOT NULL DEFAULT '',
+	review_note     TEXT NOT NULL DEFAULT '',
+	created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+	updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+	seen            INTEGER NOT NULL DEFAULT 1 CHECK (seen IN (0, 1)),            -- 执行人是否已看到（派发任务）
+	user_hidden     INTEGER NOT NULL DEFAULT 0 CHECK (user_hidden IN (0, 1)),     -- 执行人已删除记录
+	reviewer_hidden INTEGER NOT NULL DEFAULT 0 CHECK (reviewer_hidden IN (0, 1))  -- 派发者已删除记录
+);
+INSERT INTO assignments_new (id, task_id, task_public, user_id, reviewer_id, source, description, points,
+	status, submission, review_note, created_at, updated_at)
+	SELECT id, task_id, task_public, user_id, reviewer_id, source, description, points,
+	       status, submission, review_note, created_at, updated_at FROM assignments;
+DROP TABLE assignments;
+ALTER TABLE assignments_new RENAME TO assignments;
+CREATE UNIQUE INDEX assignments_one_active ON assignments(user_id, task_id)
+	WHERE status IN ('in_progress', 'submitted');
+CREATE INDEX assignments_user_id ON assignments(user_id);
+CREATE INDEX assignments_reviewer ON assignments(reviewer_id, status);
+`,
 }
