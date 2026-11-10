@@ -187,12 +187,14 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		PendingReviews    int  `json:"pendingReviews"`    // 等待我审核的提交数
 		HasPrivateTasks   bool `json:"hasPrivateTasks"`   // 私有仓库里是否有任务（被撤销的高级用户用来查看冻结仓库）
 		CanSwitchIdentity bool `json:"canSwitchIdentity"` // 管理员及其身份账号可以切换身份
+		NewBindRequests   bool `json:"newBindRequests"`   // 有未查看的绑定/解绑申请（高级用户）
 	}{User: u, CanSwitchIdentity: u.IsAdmin() || u.ParentID.Valid}
 	err := s.db.QueryRowContext(r.Context(), `
 		SELECT
 			(SELECT COUNT(*) FROM assignments WHERE reviewer_id = ? AND status = 'submitted'),
-			EXISTS (SELECT 1 FROM tasks WHERE owner_id = ?)`,
-		u.ID, u.ID).Scan(&resp.PendingReviews, &resp.HasPrivateTasks)
+			EXISTS (SELECT 1 FROM tasks WHERE owner_id = ?),
+			EXISTS (SELECT 1 FROM bindings WHERE super_id = ? AND seen = 0)`,
+		u.ID, u.ID, u.ID).Scan(&resp.PendingReviews, &resp.HasPrivateTasks, &resp.NewBindRequests)
 	if err != nil {
 		internalError(w, r, err)
 		return

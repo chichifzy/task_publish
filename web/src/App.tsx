@@ -3,6 +3,7 @@ import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router";
 import { api, errMsg, type Me, type Role } from "./api";
 import { useAuth } from "./auth";
 import { roleLabel } from "./labels";
+import { useConfirm } from "./components/Confirm";
 import LoginPage from "./pages/LoginPage";
 import PublicPage from "./pages/PublicPage";
 import PrivatePage from "./pages/PrivatePage";
@@ -11,6 +12,7 @@ import ReviewsPage from "./pages/ReviewsPage";
 import SettingsPage from "./pages/SettingsPage";
 import UsersPage from "./pages/UsersPage";
 import ProfilePage from "./pages/ProfilePage";
+import MembersPage from "./pages/MembersPage";
 
 const pages: Record<string, ReactNode> = {
   "/": <PublicPage />,
@@ -19,9 +21,10 @@ const pages: Record<string, ReactNode> = {
   "/reviews": <ReviewsPage />,
   "/settings": <SettingsPage />,
   "/users": <UsersPage />,
+  "/members": <MembersPage />,
 };
 
-type NavItem = { to: string; label: string; badge?: number };
+type NavItem = { to: string; label: string; badge?: number; dot?: boolean };
 
 // 每个角色能看到的页面。前端只控制展示，真正的权限校验在后端。
 function navFor(me: Me): NavItem[] {
@@ -30,7 +33,12 @@ function navFor(me: Me): NavItem[] {
     case "admin":
       return [{ to: "/", label: "公共仓库" }, { to: "/private", label: "私有仓库" }, reviews, { to: "/users", label: "用户管理" }];
     case "super":
-      return [{ to: "/", label: "公共仓库" }, { to: "/private", label: "私有仓库" }, reviews];
+      return [
+        { to: "/", label: "公共仓库" },
+        { to: "/private", label: "私有仓库" },
+        reviews,
+        { to: "/members", label: "Member管理", dot: me.newBindRequests },
+      ];
     case "member": {
       const items: NavItem[] = [
         { to: "/", label: "任务大厅" },
@@ -52,6 +60,7 @@ function UserMenu({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { refresh } = useAuth();
+  const confirm = useConfirm();
 
   const switchTo = async (role: Role) => {
     setOpen(false);
@@ -61,7 +70,7 @@ function UserMenu({ me, onLogout }: { me: Me; onLogout: () => void }) {
       navigate("/");
       await refresh();
     } catch (e) {
-      alert(errMsg(e));
+      confirm({ title: "切换身份失败", message: errMsg(e), alert: true });
     }
   };
 
@@ -162,6 +171,7 @@ export default function App() {
             <NavLink key={item.to} to={item.to} end>
               <span>{item.label}</span>
               {!!item.badge && <span className="badge">{item.badge}</span>}
+              {item.dot && <span className="dot" aria-label="有新申请" />}
             </NavLink>
           ))}
         </nav>

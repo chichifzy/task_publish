@@ -565,7 +565,7 @@ func dispatchOne(ctx context.Context, tx *sql.Tx, dispatcher *User, uid string, 
 	var acceptAdmin, authorized bool
 	err = tx.QueryRowContext(ctx, `
 		SELECT u.id, u.role, u.accept_admin_dispatch,
-		       EXISTS (SELECT 1 FROM authorizations a WHERE a.member_id = u.id AND a.super_id = ?)
+		       EXISTS (SELECT 1 FROM bindings b WHERE b.member_id = u.id AND b.super_id = ? AND b.status != 'pending_bind')
 		FROM users u WHERE u.uid = ?`, dispatcher.ID, uid).Scan(&targetID, &role, &acceptAdmin, &authorized)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -577,7 +577,7 @@ func dispatchOne(ctx context.Context, tx *sql.Tx, dispatcher *User, uid string, 
 	case dispatcher.IsAdmin() && !acceptAdmin:
 		return "该用户未开启“接受管理员派发任务”", nil
 	case !dispatcher.IsAdmin() && !authorized:
-		return "该用户未授权你派发任务", nil
+		return "该用户未与你绑定", nil
 	}
 	a.UserID = targetID
 	if _, err := insertAssignment(ctx, tx, a); err != nil {
@@ -606,8 +606,8 @@ func (s *Server) listDispatchTargets(w http.ResponseWriter, r *http.Request) {
 			WHERE role = 'member' AND accept_admin_dispatch = 1 ORDER BY uid`)
 	} else {
 		rows, err = s.db.QueryContext(r.Context(), `
-			SELECT u.uid, u.nickname FROM authorizations a JOIN users u ON u.id = a.member_id
-			WHERE a.super_id = ? AND u.role = 'member' ORDER BY u.uid`, u.ID)
+			SELECT u.uid, u.nickname FROM bindings b JOIN users u ON u.id = b.member_id
+			WHERE b.super_id = ? AND b.status != 'pending_bind' AND u.role = 'member' ORDER BY u.uid`, u.ID)
 	}
 	if err != nil {
 		internalError(w, r, err)

@@ -65,15 +65,22 @@ func New(db *sql.DB, static fs.FS, secureCookie bool) http.Handler {
 	m.Handle("GET /api/reviews", s.requireUser(s.listReviews))
 	m.Handle("POST /api/assignments/{id}/review", s.requireUser(s.reviewAssignment))
 
-	// 普通用户授权高级用户派发任务
+	// 绑定：普通用户申请绑定高级用户，高级用户同意后可以向其派发任务
 	m.Handle("GET /api/supers", s.requireRole(s.searchSupers, member))
-	m.Handle("GET /api/authorizations", s.requireRole(s.listAuthorizations, member))
-	m.Handle("POST /api/authorizations", s.requireRole(s.addAuthorization, member))
-	m.Handle("DELETE /api/authorizations/{uid}", s.requireRole(s.removeAuthorization, member))
+	m.Handle("GET /api/bindings", s.requireRole(s.listMyBindings, member))
+	m.Handle("POST /api/bindings", s.requireRole(s.applyBind, member))
+	m.Handle("POST /api/bindings/{uid}/{action}", s.requireRole(s.memberBindingAction, member)) // cancel / unbind / force
+	m.Handle("GET /api/members", s.requireRole(s.listMembers, super))
+	m.Handle("POST /api/members/{uid}/{action}", s.requireRole(s.superBindingAction, super)) // approve / reject / unbind
+	// 不可绑定名单：任意一方可以向管理员申请解除
+	m.Handle("GET /api/blocks", s.requireRole(s.listMyBlocks, super, member))
+	m.Handle("POST /api/blocks/{uid}/request", s.requireRole(s.requestUnblock, super, member))
 
-	// 管理员：用户管理（授予/撤销高级用户）
+	// 管理员：用户管理（授予/撤销高级用户）、不可绑定名单
 	m.Handle("GET /api/admin/users", s.requireRole(s.listUsers, admin))
 	m.Handle("PUT /api/admin/users/{uid}/role", s.requireRole(s.setUserRole, admin))
+	m.Handle("GET /api/admin/blocks", s.requireRole(s.adminListBlocks, admin))
+	m.Handle("POST /api/admin/blocks/resolve", s.requireRole(s.adminResolveBlock, admin))
 
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "接口不存在")

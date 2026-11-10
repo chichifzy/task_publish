@@ -1,14 +1,20 @@
 .PHONY: dev dev-api dev-web web build clean
 
 # 开发：make dev 同时启动前后端（或两个终端分别运行 make dev-api 和 make dev-web），然后访问 http://localhost:5173
-dev:
-	$(MAKE) -j2 dev-api dev-web
+# 前后端放在同一个 shell 里，Ctrl+C 时由 trap 正常退出，make 不再报 Error / Interrupt
+dev: web/dist/index.html
+	@go build -o bin/dev-server .
+	@trap 'exit 0' INT TERM; \
+	./bin/dev-server -addr :8080 -db data.db & \
+	(cd web && exec ./node_modules/.bin/vite) & \
+	wait
 
+# 不用 go run / pnpm dev：它们在 Ctrl+C 时返回非 0，make 会报 Error
 dev-api: web/dist/index.html
-	go run . -addr :8080 -db data.db
+	go build -o bin/dev-server . && exec ./bin/dev-server -addr :8080 -db data.db
 
 dev-web:
-	cd web && pnpm dev
+	cd web && exec ./node_modules/.bin/vite
 
 web:
 	cd web && pnpm install --frozen-lockfile && pnpm build

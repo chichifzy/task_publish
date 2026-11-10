@@ -82,6 +82,7 @@ a { color: var(--primary); }
   border-radius: 10px; background: var(--danger); color: #fff;
   font-size: 12px; line-height: 20px; text-align: center; font-weight: 600;
 }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
 
 /* 头像与弹出菜单 */
 .user-menu { position: relative; border-top: 1px solid var(--border); padding-top: 12px; }
@@ -259,7 +260,7 @@ button.modal-close:hover { background: var(--primary-softer); color: var(--text)
   border-radius: 0 0 16px 16px;
 }
 dialog.modal.confirm { width: min(400px, calc(100vw - 32px)); }
-dialog.modal.confirm .modal-body > p { line-height: 1.6; overflow-wrap: anywhere; }
+dialog.modal.confirm .modal-body > p { line-height: 1.6; overflow-wrap: anywhere; white-space: pre-line; }
 
 /* 筛选：胶囊按钮 */
 .filters { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }

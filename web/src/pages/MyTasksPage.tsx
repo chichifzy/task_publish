@@ -5,6 +5,7 @@ import { useAction, useLoader, type Run } from "../hooks";
 import { sourceText, statusTag } from "../labels";
 import TaskCard from "../components/TaskCard";
 import Messages from "../components/Messages";
+import { useConfirm } from "../components/Confirm";
 
 const filters: { key: string; label: string; match: (a: Assignment) => boolean }[] = [
   { key: "active", label: "未完成", match: (a) => a.status === "in_progress" || a.status === "submitted" },
@@ -50,12 +51,15 @@ function AssignmentCard({ a, myPoints, run }: { a: Assignment; myPoints: number;
   const penalty = Math.floor(a.points / 2);
   const active = a.status === "in_progress" || a.status === "submitted";
 
-  const abandon = () => {
+  const confirm = useConfirm();
+
+  const abandon = async () => {
     const msg =
       penalty > 0
         ? `放弃 ${code} 将扣除 ${penalty} 积分（当前 ${myPoints} 积分），确定放弃吗？`
         : `确定放弃 ${code} 吗？`;
-    if (confirm(msg)) run(() => api.abandon(a.id), penalty > 0 ? `已放弃 ${code}，扣除 ${penalty} 积分` : `已放弃 ${code}`);
+    if (await confirm({ title: "放弃任务", message: msg, confirmText: "放弃", danger: true }))
+      run(() => api.abandon(a.id), penalty > 0 ? `已放弃 ${code}，扣除 ${penalty} 积分` : `已放弃 ${code}`);
   };
 
   return (

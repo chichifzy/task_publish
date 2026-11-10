@@ -98,4 +98,44 @@ CREATE INDEX points_log_user_id ON points_log(user_id);
 ALTER TABLE users ADD COLUMN parent_id INTEGER REFERENCES users(id);
 CREATE UNIQUE INDEX users_identity ON users(parent_id, role) WHERE parent_id IS NOT NULL;
 `,
+	// #3 授权改为绑定：普通用户申请，高级用户同意。强制解绑后两个账号进入黑名单，不能再绑定。
+	`
+CREATE TABLE bindings (
+	member_id  INTEGER NOT NULL REFERENCES users(id),
+	super_id   INTEGER NOT NULL REFERENCES users(id),
+	status     TEXT NOT NULL CHECK (status IN ('pending_bind', 'bound', 'pending_unbind')),
+	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')), -- 申请绑定时间
+	bound_at   TEXT,                                                          -- 绑定成功时间
+	PRIMARY KEY (member_id, super_id)
+) WITHOUT ROWID;
+CREATE INDEX bindings_super_id ON bindings(super_id, status);
+INSERT INTO bindings (member_id, super_id, status, created_at, bound_at)
+	SELECT member_id, super_id, 'bound', created_at, created_at FROM authorizations;
+DROP TABLE authorizations;
+
+-- 不可绑定的账号对，与角色无关：任意一方升级或降级后仍然不能绑定。user_a < user_b。
+CREATE TABLE bind_blacklist (
+	user_a     INTEGER NOT NULL REFERENCES users(id),
+	user_b     INTEGER NOT NULL REFERENCES users(id),
+	blocked_by INTEGER NOT NULL REFERENCES users(id), -- 执行强制解绑的一方
+	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+	PRIMARY KEY (user_a, user_b),
+	CHECK (user_a < user_b)
+) WITHOUT ROWID;
+
+-- 向管理员申请解除不可绑定状态
+CREATE TABLE unblock_requests (
+	id           INTEGER PRIMARY KEY,
+	user_a       INTEGER NOT NULL,
+	user_b       INTEGER NOT NULL,
+	requester_id INTEGER NOT NULL REFERENCES users(id),
+	status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+	created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE UNIQUE INDEX unblock_requests_pending ON unblock_requests(user_a, user_b) WHERE status = 'pending';
+`,
+	// #4 高级用户是否已经看到绑定/解绑申请，用于 Member管理 的红点提醒
+	`
+ALTER TABLE bindings ADD COLUMN seen INTEGER NOT NULL DEFAULT 1 CHECK (seen IN (0, 1));
+`,
 }

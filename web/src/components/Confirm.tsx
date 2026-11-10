@@ -6,6 +6,8 @@ export type ConfirmOptions = {
   message: ReactNode;
   confirmText?: string;
   danger?: boolean;
+  /** 只显示一个按钮，用作提示框（替代 alert） */
+  alert?: boolean;
 };
 
 type ConfirmFn = (opts: ConfirmOptions) => Promise<boolean>;
@@ -63,10 +65,17 @@ function ConfirmDialog({ opts, onDone }: { opts: ConfirmOptions; onDone: (ok: bo
       <div className="modal-body">
         <p>{opts.message}</p>
         <div className="modal-foot">
-          <button type="button" className="secondary" ref={cancelRef} onClick={() => close(false)}>
-            取消
-          </button>
-          <button type="button" className={opts.danger ? "danger" : undefined} onClick={() => close(true)}>
+          {!opts.alert && (
+            <button type="button" className="secondary" ref={cancelRef} onClick={() => close(false)}>
+              取消
+            </button>
+          )}
+          <button
+            type="button"
+            className={opts.danger ? "danger" : undefined}
+            ref={opts.alert ? cancelRef : undefined}
+            onClick={() => close(true)}
+          >
             {opts.confirmText ?? "确定"}
           </button>
         </div>

@@ -12,6 +12,8 @@ export type Me = {
   hasPrivateTasks: boolean;
   /** 管理员及其身份账号可以切换身份 */
   canSwitchIdentity: boolean;
+  /** 高级用户：有未查看的绑定/解绑申请 */
+  newBindRequests: boolean;
 };
 
 export type Task = {
@@ -59,8 +61,25 @@ export type PrivateTaskInput = { description: string; points: number };
 
 export type DispatchResult = { uid: string; ok: boolean; error?: string };
 
-export type SuperInfo = UserRef & { authorized: boolean };
-export type AuthorizationInfo = UserRef & { active: boolean };
+export type BindStatus = "pending_bind" | "bound" | "pending_unbind";
+export type SuperInfo = UserRef & { status: BindStatus | "blocked" | "" };
+export type BindingInfo = UserRef & { status: BindStatus; active: boolean };
+export type MemberInfo = UserRef & {
+  points: number;
+  createdAt: string;
+  status: BindStatus;
+  appliedAt: string;
+  boundAt: string | null;
+};
+export type BlockInfo = UserRef & { role: Role; byMe: boolean; pending: boolean };
+export type AdminBlockInfo = {
+  a: UserRef;
+  b: UserRef;
+  blockedBy: string;
+  createdAt: string;
+  requestId: number | null;
+  requester: string | null;
+};
 export type UserInfo = UserRef & { role: Role; points: number; createdAt: string };
 
 export class ApiError extends Error {
@@ -129,12 +148,21 @@ export const api = {
     request<void>("POST", `/assignments/${id}/review`, { approve, note }),
 
   searchSupers: (query: string) => request<SuperInfo[]>("GET", `/supers?q=${q(query)}`),
-  authorizations: () => request<AuthorizationInfo[]>("GET", "/authorizations"),
-  authorize: (uid: string) => request<void>("POST", "/authorizations", { uid }),
-  unauthorize: (uid: string) => request<void>("DELETE", `/authorizations/${q(uid)}`),
+  myBindings: () => request<BindingInfo[]>("GET", "/bindings"),
+  applyBind: (uid: string) => request<void>("POST", "/bindings", { uid }),
+  bindingAction: (uid: string, action: "cancel" | "unbind" | "force") =>
+    request<void>("POST", `/bindings/${q(uid)}/${action}`),
+  members: () => request<MemberInfo[]>("GET", "/members"),
+  memberAction: (uid: string, action: "approve" | "reject" | "unbind") =>
+    request<void>("POST", `/members/${q(uid)}/${action}`),
+  myBlocks: () => request<BlockInfo[]>("GET", "/blocks"),
+  requestUnblock: (uid: string) => request<void>("POST", `/blocks/${q(uid)}/request`),
 
   listUsers: (query: string) => request<UserInfo[]>("GET", `/admin/users?q=${q(query)}`),
   setRole: (uid: string, role: "super" | "member") => request<void>("PUT", `/admin/users/${q(uid)}/role`, { role }),
+  adminBlocks: () => request<AdminBlockInfo[]>("GET", "/admin/blocks"),
+  resolveBlock: (a: string, b: string, remove: boolean) =>
+    request<void>("POST", "/admin/blocks/resolve", { a, b, remove }),
 };
 
 export const taskCode = (id: number, isPublic: boolean) => `${isPublic ? "G" : "P"}-${id}`;
