@@ -10,6 +10,8 @@ export type Me = {
   acceptAdminDispatch: boolean;
   pendingReviews: number;
   hasPrivateTasks: boolean;
+  /** 管理员及其身份账号可以切换身份 */
+  canSwitchIdentity: boolean;
 };
 
 export type Task = {
@@ -94,6 +96,10 @@ export const api = {
   logout: () => request<void>("POST", "/auth/logout"),
   updateSettings: (acceptAdminDispatch: boolean) =>
     request<void>("PUT", "/me/settings", { acceptAdminDispatch }),
+  updateProfile: (nickname: string) => request<void>("PUT", "/me/profile", { nickname }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    request<void>("PUT", "/me/password", { oldPassword, newPassword }),
+  switchIdentity: (role: Role) => request<void>("POST", "/me/identity", { role }),
 
   listPublic: () => request<Task[]>("GET", "/public/tasks"),
   createPublic: (input: PublicTaskInput) => request<{ id: number }>("POST", "/public/tasks", input),

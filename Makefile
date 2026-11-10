@@ -1,6 +1,9 @@
-.PHONY: dev-api dev-web web build clean
+.PHONY: dev dev-api dev-web web build clean
 
-# 开发：两个终端分别运行 make dev-api 和 make dev-web，然后访问 http://localhost:5173
+# 开发：make dev 同时启动前后端（或两个终端分别运行 make dev-api 和 make dev-web），然后访问 http://localhost:5173
+dev:
+	$(MAKE) -j2 dev-api dev-web
+
 dev-api: web/dist/index.html
 	go run . -addr :8080 -db data.db
 

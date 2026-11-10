@@ -151,7 +151,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	pattern := "%" + escapeLike(q) + "%"
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT uid, nickname, role, points, created_at FROM users
-		WHERE role != 'admin'
+		WHERE role != 'admin' AND parent_id IS NULL -- 管理员的身份账号不参与授予/撤销
 		  AND (? = '' OR uid LIKE ? ESCAPE '\' OR nickname LIKE ? ESCAPE '\')
 		ORDER BY role = 'super' DESC, id DESC
 		LIMIT 200`, q, pattern, pattern)
@@ -191,7 +191,7 @@ func (s *Server) setUserRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := s.db.ExecContext(r.Context(),
-		`UPDATE users SET role = ? WHERE uid = ? AND role IN ('super', 'member')`,
+		`UPDATE users SET role = ? WHERE uid = ? AND role IN ('super', 'member') AND parent_id IS NULL`,
 		in.Role, r.PathValue("uid"))
 	if err != nil {
 		internalError(w, r, err)

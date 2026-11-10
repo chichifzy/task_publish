@@ -30,15 +30,30 @@ const (
 )
 
 type User struct {
-	ID                  int64  `json:"-"`
-	UID                 string `json:"uid"`
-	Nickname            string `json:"nickname"`
-	Role                string `json:"role"`
-	Points              int64  `json:"points"`
-	AcceptAdminDispatch bool   `json:"acceptAdminDispatch"`
+	ID                  int64         `json:"-"`
+	UID                 string        `json:"uid"`
+	Nickname            string        `json:"nickname"`
+	Role                string        `json:"role"`
+	Points              int64         `json:"points"`
+	AcceptAdminDispatch bool          `json:"acceptAdminDispatch"`
+	ParentID            sql.NullInt64 `json:"-"` // 非空表示这是管理员切换出的身份账号
 }
 
 func (u *User) IsAdmin() bool { return u.Role == RoleAdmin }
+
+// RootID 返回真实账号的 id：身份账号返回所属管理员，其他返回自身。
+func (u *User) RootID() int64 {
+	if u.ParentID.Valid {
+		return u.ParentID.Int64
+	}
+	return u.ID
+}
+
+// identitySuffix 身份账号的用户 ID 后缀。注册的用户 ID 不允许下划线，不会冲突。
+var identitySuffix = map[string]string{
+	RoleSuper:  "_super_user",
+	RoleMember: "_member_user",
+}
 
 // CanManagePrivate：管理员和高级用户可以修改自己的私有仓库，被撤销的高级用户仓库冻结。
 func (u *User) CanManagePrivate() bool { return u.Role == RoleAdmin || u.Role == RoleSuper }
@@ -169,9 +184,10 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	resp := struct {
 		*User
-		PendingReviews  int  `json:"pendingReviews"`  // 等待我审核的提交数
-		HasPrivateTasks bool `json:"hasPrivateTasks"` // 私有仓库里是否有任务（被撤销的高级用户用来查看冻结仓库）
-	}{User: u}
+		PendingReviews    int  `json:"pendingReviews"`    // 等待我审核的提交数
+		HasPrivateTasks   bool `json:"hasPrivateTasks"`   // 私有仓库里是否有任务（被撤销的高级用户用来查看冻结仓库）
+		CanSwitchIdentity bool `json:"canSwitchIdentity"` // 管理员及其身份账号可以切换身份
+	}{User: u, CanSwitchIdentity: u.IsAdmin() || u.ParentID.Valid}
 	err := s.db.QueryRowContext(r.Context(), `
 		SELECT
 			(SELECT COUNT(*) FROM assignments WHERE reviewer_id = ? AND status = 'submitted'),
@@ -195,6 +211,129 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.db.ExecContext(r.Context(),
 		`UPDATE users SET accept_admin_dispatch = ? WHERE id = ?`,
 		in.AcceptAdminDispatch, currentUser(r).ID); err != nil {
+		internalError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// switchIdentity 管理员在管理员、高级用户、普通用户三个身份间切换。
+// 高级用户和普通用户身份是独立账号（首次切换时创建），用户名与管理员一致，
+// 切换只是把当前会话指向目标账号，之后的权限、数据都按目标账号处理。
+func (s *Server) switchIdentity(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Role string `json:"role"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if in.Role != RoleAdmin && in.Role != RoleSuper && in.Role != RoleMember {
+		writeError(w, http.StatusBadRequest, "身份只能是 admin、super 或 member")
+		return
+	}
+	u := currentUser(r)
+	rootID := u.RootID()
+	var rootUID, nickname, rootRole string
+	if err := s.db.QueryRowContext(r.Context(),
+		`SELECT uid, nickname, role FROM users WHERE id = ?`, rootID).Scan(&rootUID, &nickname, &rootRole); err != nil {
+		internalError(w, r, err)
+		return
+	}
+	if rootRole != RoleAdmin {
+		writeError(w, http.StatusForbidden, "只有管理员可以切换身份")
+		return
+	}
+	c, _ := r.Cookie(sessionCookie) // requireUser 已保证存在
+	err := s.withTx(r.Context(), func(tx *sql.Tx) error {
+		targetID := rootID
+		if in.Role != RoleAdmin {
+			if _, err := tx.ExecContext(r.Context(),
+				`INSERT INTO users (uid, nickname, password_hash, role, parent_id) VALUES (?, ?, '!', ?, ?)
+				 ON CONFLICT DO NOTHING`,
+				rootUID+identitySuffix[in.Role], nickname, in.Role, rootID); err != nil {
+				return err
+			}
+			if err := tx.QueryRowContext(r.Context(),
+				`SELECT id FROM users WHERE parent_id = ? AND role = ?`, rootID, in.Role).Scan(&targetID); err != nil {
+				return err
+			}
+		}
+		_, err := tx.ExecContext(r.Context(),
+			`UPDATE sessions SET user_id = ? WHERE token_hash = ?`, targetID, hashToken(c.Value))
+		return err
+	})
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// updateProfile 修改自己的用户名，校验规则与注册相同。
+// 管理员和它的身份账号用户名保持一致，一起修改。
+func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Nickname string `json:"nickname"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	in.Nickname = strings.TrimSpace(in.Nickname)
+	if msg := ValidateNickname(in.Nickname); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	if _, err := s.db.ExecContext(r.Context(),
+		`UPDATE users SET nickname = ?1 WHERE id = ?2 OR parent_id = ?2`, in.Nickname, currentUser(r).RootID()); err != nil {
+		internalError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// changePassword 校验原密码后修改密码。当前会话保持有效，其他设备上的会话全部失效。
+func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		OldPassword string `json:"oldPassword"`
+		NewPassword string `json:"newPassword"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if msg := ValidatePassword(in.NewPassword); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	u := currentUser(r)
+	// 身份账号没有自己的密码，修改的是所属管理员的密码
+	rootID := u.RootID()
+	var hash string
+	if err := s.db.QueryRowContext(r.Context(),
+		`SELECT password_hash FROM users WHERE id = ?`, rootID).Scan(&hash); err != nil {
+		internalError(w, r, err)
+		return
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(in.OldPassword)) != nil {
+		writeError(w, http.StatusBadRequest, "原密码错误")
+		return
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(in.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	c, _ := r.Cookie(sessionCookie) // requireUser 已保证存在
+	err = s.withTx(r.Context(), func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(r.Context(),
+			`UPDATE users SET password_hash = ? WHERE id = ?`, string(newHash), rootID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(r.Context(),
+			`DELETE FROM sessions WHERE token_hash <> ?1
+			   AND user_id IN (SELECT id FROM users WHERE id = ?2 OR parent_id = ?2)`, hashToken(c.Value), rootID)
+		return err
+	})
+	if err != nil {
 		internalError(w, r, err)
 		return
 	}
@@ -250,11 +389,11 @@ func (s *Server) requireUser(next http.HandlerFunc) http.Handler {
 		}
 		var u User
 		err = s.db.QueryRowContext(r.Context(),
-			`SELECT u.id, u.uid, u.nickname, u.role, u.points, u.accept_admin_dispatch
+			`SELECT u.id, u.uid, u.nickname, u.role, u.points, u.accept_admin_dispatch, u.parent_id
 			 FROM sessions s JOIN users u ON u.id = s.user_id
 			 WHERE s.token_hash = ? AND s.expires_at > ?`,
 			hashToken(c.Value), time.Now().Unix()).
-			Scan(&u.ID, &u.UID, &u.Nickname, &u.Role, &u.Points, &u.AcceptAdminDispatch)
+			Scan(&u.ID, &u.UID, &u.Nickname, &u.Role, &u.Points, &u.AcceptAdminDispatch, &u.ParentID)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusUnauthorized, "登录已过期，请重新登录")
 			return

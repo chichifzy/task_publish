@@ -92,4 +92,10 @@ CREATE TABLE points_log (
 );
 CREATE INDEX points_log_user_id ON points_log(user_id);
 `,
+	// #2 管理员的切换身份账号：parent_id 指向管理员，每种角色最多一个。
+	// 这些账号没有可用密码（password_hash 为 '!'），只能由管理员切换进入。
+	`
+ALTER TABLE users ADD COLUMN parent_id INTEGER REFERENCES users(id);
+CREATE UNIQUE INDEX users_identity ON users(parent_id, role) WHERE parent_id IS NOT NULL;
+`,
 }

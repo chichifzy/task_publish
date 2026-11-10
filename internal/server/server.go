@@ -32,6 +32,9 @@ func New(db *sql.DB, static fs.FS, secureCookie bool) http.Handler {
 	m.HandleFunc("POST /api/auth/logout", s.logout)
 	m.Handle("GET /api/me", s.requireUser(s.me))
 	m.Handle("PUT /api/me/settings", s.requireRole(s.updateSettings, member))
+	m.Handle("PUT /api/me/profile", s.requireUser(s.updateProfile))
+	m.Handle("PUT /api/me/password", s.requireUser(s.changePassword))
+	m.Handle("POST /api/me/identity", s.requireUser(s.switchIdentity)) // 处理函数内校验是否属于管理员
 
 	// 公共任务仓库
 	m.Handle("GET /api/public/tasks", s.requireUser(s.listPublicTasks))

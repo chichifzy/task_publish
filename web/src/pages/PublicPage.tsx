@@ -1,10 +1,12 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { api, taskCode, type PublicTaskInput, type Task } from "../api";
 import { useMe } from "../auth";
 import { useAction, useLoader } from "../hooks";
 import TaskCard, { type Tag } from "../components/TaskCard";
 import Messages from "../components/Messages";
 import DrawBox from "../components/DrawBox";
+import Modal, { type ModalHandle } from "../components/Modal";
+import { useConfirm } from "../components/Confirm";
 
 const emptyForm: PublicTaskInput = { description: "", points: 1, visibility: "all", enabled: true };
 
@@ -16,7 +18,9 @@ export default function PublicPage() {
     load();
     refresh();
   });
-  const [editing, setEditing] = useState<Task | null>(null);
+  // null：弹窗关闭；{ task: null }：新建；{ task }：编辑
+  const [modal, setModal] = useState<{ task: Task | null } | null>(null);
+  const confirm = useConfirm();
   const isAdmin = me.role === "admin";
   const isMember = me.role === "member";
 
@@ -37,8 +41,15 @@ export default function PublicPage() {
     return tags;
   };
 
-  const remove = (t: Task) => {
-    if (confirm(`确定删除 ${taskCode(t.id, true)}？已接取的任务不受影响。`)) {
+  const remove = async (t: Task) => {
+    if (
+      await confirm({
+        title: "删除任务",
+        message: `确定删除 ${taskCode(t.id, true)}？已接取的任务不受影响。`,
+        confirmText: "删除",
+        danger: true,
+      })
+    ) {
       run(() => api.deletePublic(t.id), `已删除 ${taskCode(t.id, true)}`);
     }
   };
@@ -51,15 +62,15 @@ export default function PublicPage() {
 
   return (
     <>
-      {isAdmin && (
+      {modal && (
         <PublicTaskForm
-          key={editing?.id ?? "new"}
-          task={editing}
-          onSaved={() => {
-            setEditing(null);
+          task={modal.task}
+          onSaved={(msg) => {
+            setModal(null);
+            setNotice(msg);
             load();
           }}
-          onCancel={() => setEditing(null)}
+          onCancel={() => setModal(null)}
         />
       )}
       {isMember && (
@@ -71,7 +82,10 @@ export default function PublicPage() {
         />
       )}
 
-      <h2>{isMember ? "可接取的任务" : "公共任务仓库"}</h2>
+      <div className="page-head">
+        <h2>{isMember ? "可接取的任务" : "公共任务仓库"}</h2>
+        {isAdmin && <button onClick={() => setModal({ task: null })}>新建公共任务</button>}
+      </div>
       <Messages error={error || loadError} notice={notice} />
       {tasks?.length === 0 && <p className="muted">暂无任务</p>}
       {tasks?.map((t) => (
@@ -98,13 +112,7 @@ export default function PublicPage() {
               )}
               {isAdmin && (
                 <>
-                  <button
-                    className="secondary"
-                    onClick={() => {
-                      setEditing(t);
-                      window.scrollTo({ top: 0, behavior: "smooth" });
-                    }}
-                  >
+                  <button className="secondary" onClick={() => setModal({ task: t })}>
                     编辑
                   </button>
                   <button className="danger" onClick={() => remove(t)}>
@@ -120,7 +128,15 @@ export default function PublicPage() {
   );
 }
 
-function PublicTaskForm({ task, onSaved, onCancel }: { task: Task | null; onSaved: () => void; onCancel: () => void }) {
+function PublicTaskForm({
+  task,
+  onSaved,
+  onCancel,
+}: {
+  task: Task | null;
+  onSaved: (notice: string) => void;
+  onCancel: () => void;
+}) {
   const [form, setForm] = useState<PublicTaskInput>(
     task
       ? {
@@ -131,20 +147,20 @@ function PublicTaskForm({ task, onSaved, onCancel }: { task: Task | null; onSave
         }
       : emptyForm,
   );
-  const { run, error, notice } = useAction(onSaved);
+  const { run, error, busy } = useAction(() => {});
+  const modalRef = useRef<ModalHandle>(null);
+  // 先播放收回动画，再通知父组件卸载弹窗
+  const close = (then: () => void) => (modalRef.current ? modalRef.current.close(then) : then());
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const ok = await run(
-      () => (task ? api.updatePublic(task.id, form) : api.createPublic(form)),
-      task ? undefined : "已创建",
-    );
-    if (ok && !task) setForm(emptyForm);
+    const ok = await run(() => (task ? api.updatePublic(task.id, form) : api.createPublic(form)));
+    if (ok) close(() => onSaved(task ? `已保存 ${taskCode(task.id, true)}` : "已创建"));
   };
 
   return (
-    <form className="card" onSubmit={submit}>
-      <span className="code">{task ? `编辑 ${taskCode(task.id, true)}` : "新建公共任务"}</span>
+    <Modal title={task ? `编辑 ${taskCode(task.id, true)}` : "新建公共任务"} onClose={onCancel} ref={modalRef}>
+      <form className="modal-body" onSubmit={submit}>
       <label>
         任务描述
         <textarea
@@ -185,15 +201,16 @@ function PublicTaskForm({ task, onSaved, onCancel }: { task: Task | null; onSave
           </select>
         </label>
       </div>
-      <Messages error={error} notice={notice} />
-      <div className="row">
-        <button type="submit">{task ? "保存" : "创建"}</button>
-        {task && (
-          <button type="button" className="secondary" onClick={onCancel}>
-            取消
-          </button>
-        )}
+      <Messages error={error} />
+      <div className="modal-foot">
+        <button type="button" className="secondary" onClick={() => close(onCancel)}>
+          取消
+        </button>
+        <button type="submit" disabled={busy}>
+          {task ? "保存" : "创建"}
+        </button>
       </div>
-    </form>
+      </form>
+    </Modal>
   );
 }

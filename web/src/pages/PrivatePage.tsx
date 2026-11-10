@@ -1,47 +1,62 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { api, taskCode, type DispatchResult, type PrivateTaskInput, type Task } from "../api";
 import { useMe } from "../auth";
 import { useAction, useLoader } from "../hooks";
 import { userLabel } from "../labels";
 import TaskCard from "../components/TaskCard";
 import Messages from "../components/Messages";
+import Modal, { type ModalHandle } from "../components/Modal";
+import { useConfirm } from "../components/Confirm";
 
 /** 私有任务仓库：增删改、派发。被撤销的高级用户只能查看（冻结）。 */
 export default function PrivatePage() {
   const { me } = useMe();
   const { data, error: loadError, load } = useLoader(api.listPrivate);
-  const { run, error, notice } = useAction(load);
-  const [editing, setEditing] = useState<Task | null>(null);
+  const { run, error, notice, setNotice } = useAction(load);
+  // null：弹窗关闭；{ task: null }：新建；{ task }：编辑
+  const [modal, setModal] = useState<{ task: Task | null } | null>(null);
   const [dispatching, setDispatching] = useState<number | null>(null);
+  const confirm = useConfirm();
   const isAdmin = me.role === "admin";
   const frozen = data?.frozen ?? me.role === "member";
 
-  const remove = (t: Task) => {
-    if (confirm(`确定删除 ${taskCode(t.id, false)}？已派发的任务不受影响。`)) {
+  const remove = async (t: Task) => {
+    if (
+      await confirm({
+        title: "删除任务",
+        message: `确定删除 ${taskCode(t.id, false)}？已派发的任务不受影响。`,
+        confirmText: "删除",
+        danger: true,
+      })
+    ) {
       run(() => api.deletePrivate(t.id), `已删除 ${taskCode(t.id, false)}`);
     }
   };
 
   return (
     <>
-      {frozen ? (
+      {frozen && (
         <p className="card muted">
           你的高级用户身份已被撤销，私有仓库已冻结：只能查看，不能修改或派发。已派发的任务仍然有效，提交后仍由你审核。
         </p>
-      ) : (
+      )}
+      {modal && !frozen && (
         <PrivateTaskForm
-          key={editing?.id ?? "new"}
-          task={editing}
+          task={modal.task}
           isAdmin={isAdmin}
-          onSaved={() => {
-            setEditing(null);
+          onSaved={(msg) => {
+            setModal(null);
+            setNotice(msg);
             load();
           }}
-          onCancel={() => setEditing(null)}
+          onCancel={() => setModal(null)}
         />
       )}
 
-      <h2>我的私有仓库</h2>
+      <div className="page-head">
+        <h2>我的私有仓库</h2>
+        {!frozen && <button onClick={() => setModal({ task: null })}>新建私有任务</button>}
+      </div>
       <Messages error={error || loadError} notice={notice} />
       {data?.tasks.length === 0 && <p className="muted">私有仓库还没有任务，可以新建，或从公共仓库复制</p>}
       {data?.tasks.map((t) => (
@@ -57,13 +72,7 @@ export default function PrivatePage() {
                 <button onClick={() => setDispatching(dispatching === t.id ? null : t.id)}>
                   {dispatching === t.id ? "收起派发" : "派发"}
                 </button>
-                <button
-                  className="secondary"
-                  onClick={() => {
-                    setEditing(t);
-                    window.scrollTo({ top: 0, behavior: "smooth" });
-                  }}
-                >
+                <button className="secondary" onClick={() => setModal({ task: t })}>
                   编辑
                 </button>
                 <button className="danger" onClick={() => remove(t)}>
@@ -88,27 +97,26 @@ function PrivateTaskForm({
 }: {
   task: Task | null;
   isAdmin: boolean;
-  onSaved: () => void;
+  onSaved: (notice: string) => void;
   onCancel: () => void;
 }) {
-  const empty: PrivateTaskInput = { description: "", points: 1 };
   const [form, setForm] = useState<PrivateTaskInput>(
-    task ? { description: task.description, points: task.points } : empty,
+    task ? { description: task.description, points: task.points } : { description: "", points: 1 },
   );
-  const { run, error, notice } = useAction(onSaved);
+  const { run, error, busy } = useAction(() => {});
+  const modalRef = useRef<ModalHandle>(null);
+  // 先播放收回动画，再通知父组件卸载弹窗
+  const close = (then: () => void) => (modalRef.current ? modalRef.current.close(then) : then());
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const ok = await run(
-      () => (task ? api.updatePrivate(task.id, form) : api.createPrivate(form)),
-      task ? undefined : "已创建",
-    );
-    if (ok && !task) setForm(empty);
+    const ok = await run(() => (task ? api.updatePrivate(task.id, form) : api.createPrivate(form)));
+    if (ok) close(() => onSaved(task ? `已保存 ${taskCode(task.id, false)}` : "已创建"));
   };
 
   return (
-    <form className="card" onSubmit={submit}>
-      <span className="code">{task ? `编辑 ${taskCode(task.id, false)}` : "新建私有任务"}</span>
+    <Modal title={task ? `编辑 ${taskCode(task.id, false)}` : "新建私有任务"} onClose={onCancel} ref={modalRef}>
+      <form className="modal-body" onSubmit={submit}>
       <label>
         任务描述
         <textarea
@@ -133,16 +141,17 @@ function PrivateTaskForm({
       <span className="muted">
         {isAdmin ? "积分为不小于 1 的整数" : "积分为 1-9 的整数；从公共仓库复制的任务可以保留原积分，修改积分时需改为 1-9"}
       </span>
-      <Messages error={error} notice={notice} />
-      <div className="row">
-        <button type="submit">{task ? "保存" : "创建"}</button>
-        {task && (
-          <button type="button" className="secondary" onClick={onCancel}>
-            取消
-          </button>
-        )}
+      <Messages error={error} />
+      <div className="modal-foot">
+        <button type="button" className="secondary" onClick={() => close(onCancel)}>
+          取消
+        </button>
+        <button type="submit" disabled={busy}>
+          {task ? "保存" : "创建"}
+        </button>
       </div>
-    </form>
+      </form>
+    </Modal>
   );
 }
 

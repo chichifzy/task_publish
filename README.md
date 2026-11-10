@@ -6,6 +6,8 @@ Go（`net/http`）+ SQLite（`modernc.org/sqlite`，无 CGO）+ React（Vite）�
 ## 开发
 
 ```bash
+make dev       # 一键同时启动下面两个服务，Ctrl+C 一起停止
+# 或分两个终端：
 make dev-api   # 终端 1：Go 服务，:8080
 make dev-web   # 终端 2：Vite，:5173，/api 代理到 :8080
 ```

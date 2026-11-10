@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
-import { Navigate, NavLink, Route, Routes } from "react-router";
-import type { Me } from "./api";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router";
+import { api, errMsg, type Me, type Role } from "./api";
 import { useAuth } from "./auth";
 import { roleLabel } from "./labels";
 import LoginPage from "./pages/LoginPage";
@@ -10,6 +10,7 @@ import MyTasksPage from "./pages/MyTasksPage";
 import ReviewsPage from "./pages/ReviewsPage";
 import SettingsPage from "./pages/SettingsPage";
 import UsersPage from "./pages/UsersPage";
+import ProfilePage from "./pages/ProfilePage";
 
 const pages: Record<string, ReactNode> = {
   "/": <PublicPage />,
@@ -44,13 +45,99 @@ function navFor(me: Me): NavItem[] {
   }
 }
 
+/** 侧边栏底部的头像和弹出菜单。点击外部或按 Esc 关闭。 */
+function UserMenu({ me, onLogout }: { me: Me; onLogout: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+  const { refresh } = useAuth();
+
+  const switchTo = async (role: Role) => {
+    setOpen(false);
+    setSwitching(false);
+    try {
+      await api.switchIdentity(role);
+      navigate("/");
+      await refresh();
+    } catch (e) {
+      alert(errMsg(e));
+    }
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="user-menu" ref={ref}>
+      {open && (
+        <div className="popover" role="menu">
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              navigate("/profile");
+            }}
+          >
+            个人设置
+          </button>
+          {me.canSwitchIdentity && (
+            <button role="menuitem" aria-expanded={switching} onClick={() => setSwitching(!switching)}>
+              切换身份 {switching ? "▾" : "▸"}
+            </button>
+          )}
+          {me.canSwitchIdentity &&
+            switching &&
+            (["admin", "super", "member"] as const).map((role) => (
+              <button
+                key={role}
+                role="menuitem"
+                className="sub-item"
+                disabled={role === me.role}
+                onClick={() => switchTo(role)}
+              >
+                {roleLabel[role]}
+                {role === me.role && "（当前）"}
+              </button>
+            ))}
+          <button role="menuitem" className="danger-text" onClick={onLogout}>
+            退出登录
+          </button>
+        </div>
+      )}
+      <button className="user-chip" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="avatar">{Array.from(me.nickname)[0] ?? "?"}</span>
+        <span className="user-text">
+          <span className="user-name">{me.nickname}</span>
+          <span className="user-role">
+            {roleLabel[me.role]} · {me.uid}
+          </span>
+        </span>
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   const { user, loading, logout } = useAuth();
-  if (loading) return <p className="container">加载中…</p>;
+  if (loading) return <p className="loading">加载中…</p>;
 
   if (!user) {
     return (
-      <main className="container">
+      <main className="auth-page">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
@@ -61,34 +148,37 @@ export default function App() {
 
   const nav = navFor(user);
   return (
-    <>
-      <header className="header">
-        <nav>
+    <div className="layout">
+      <aside className="sidebar">
+        <div className="brand">任务发布系统</div>
+        {user.role === "member" && (
+          <div className="points-box">
+            <span className="muted">我的积分</span>
+            <strong>{user.points}</strong>
+          </div>
+        )}
+        <nav className="side-nav">
           {nav.map((item) => (
             <NavLink key={item.to} to={item.to} end>
-              {item.label}
+              <span>{item.label}</span>
               {!!item.badge && <span className="badge">{item.badge}</span>}
             </NavLink>
           ))}
         </nav>
-        <span className="row">
-          <span>
-            {user.nickname}（{user.uid}）· {roleLabel[user.role]}
-            {user.role === "member" && ` · ${user.points} 积分`}
-          </span>
-          <button className="link" onClick={logout}>
-            退出
-          </button>
-        </span>
-      </header>
-      <main className="container">
-        <Routes>
-          {nav.map((item) => (
-            <Route key={item.to} path={item.to} element={pages[item.to]} />
-          ))}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <UserMenu me={user} onLogout={logout} />
+      </aside>
+      {/* key 随身份变化，切换身份后页面重新挂载并重新加载数据 */}
+      <main className="content" key={user.uid}>
+        <div className="container">
+          <Routes>
+            {nav.map((item) => (
+              <Route key={item.to} path={item.to} element={pages[item.to]} />
+            ))}
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
       </main>
-    </>
+    </div>
   );
 }
