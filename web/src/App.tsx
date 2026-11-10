@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router";
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router";
 import { api, errMsg, type Me, type Role } from "./api";
 import { useAuth } from "./auth";
 import { roleLabel } from "./labels";
@@ -155,10 +155,27 @@ export default function App() {
     );
   }
 
+  return <Layout user={user} logout={logout} />;
+}
+
+function Layout({ user, logout }: { user: Me; logout: () => void }) {
+  // 手机端侧边栏变成抽屉，切换页面后自动收起
+  const [navOpen, setNavOpen] = useState(false);
+  const { pathname } = useLocation();
+  useEffect(() => setNavOpen(false), [pathname]);
+
   const nav = navFor(user);
+  const hasNotice = nav.some((item) => item.badge || item.dot);
   return (
     <div className="layout">
-      <aside className="sidebar">
+      <header className="topbar">
+        <button className="menu-btn" aria-label="打开菜单" onClick={() => setNavOpen(true)}>
+          ☰{hasNotice && <span className="dot" />}
+        </button>
+        <div className="brand">任务发布系统</div>
+      </header>
+      {navOpen && <div className="drawer-mask" onClick={() => setNavOpen(false)} />}
+      <aside className={navOpen ? "sidebar open" : "sidebar"}>
         <div className="brand">任务发布系统</div>
         {user.role === "member" && (
           <div className="points-box">

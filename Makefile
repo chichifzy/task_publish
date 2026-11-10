@@ -1,6 +1,7 @@
 .PHONY: dev dev-api dev-web web build clean
 
 # 开发：make dev 同时启动前后端（或两个终端分别运行 make dev-api 和 make dev-web），然后访问 http://localhost:5173
+# 同一局域网的手机访问 http://<电脑IP>:5173（vite.config.ts 中 host: true，Vite 启动时会打印 Network 地址）
 # 前后端放在同一个 shell 里，Ctrl+C 时由 trap 正常退出，make 不再报 Error / Interrupt
 dev: web/dist/index.html
 	@go build -o bin/dev-server .
